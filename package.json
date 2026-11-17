@@ -1,0 +1,104 @@
+{
+  "name": "lemon-chat-irc",
+  "productName": "Lemon IRC",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lemon IRC: a free IRC client for Windows, Linux and the browser. What if Lemon Chat worked on IRC? The Lemon Chat web client converted into an IRC client, with a small Node.js bridge and an Electron desktop app.",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "build": "node build.cjs",
+    "start": "node tools/stop-bridge.cjs && node build.cjs && node bridge/server.cjs",
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node build.cjs && node tests/browser.cjs",
+    "test:mobile": "node build.cjs && node tests/mobile.cjs",
+    "test:libera": "node tests/libera.cjs",
+    "test:networks": "node tests/networks.cjs",
+    "electron": "node build.cjs && electron .",
+    "dist": "node build.cjs && electron-builder",
+    "dist:win": "node build.cjs && electron-builder --win",
+    "dist:linux": "node build.cjs && electron-builder --linux",
+    "dist:mac": "node build.cjs && electron-builder --mac",
+    "dist:dir": "node build.cjs && electron-builder --dir"
+  },
+  "keywords": [
+    "irc",
+    "irc-client",
+    "web-irc",
+    "irc-webclient",
+    "electron",
+    "lemon-chat",
+    "lemon-irc"
+  ],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "lemon.chat.irc",
+    "productName": "Lemon IRC",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**",
+      "bridge/**",
+      "vendor/**",
+      "client.html",
+      "networks.json",
+      "bridge.config.json",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Network",
+      "artifactName": "lemon-chat-irc-${version}-linux-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.social-networking",
+      "identity": null,
+      "artifactName": "lemon-chat-irc-${version}-mac-${arch}.${ext}"
+    },
+    "publish": null,
+    "artifactName": "lemon-chat-irc-${version}-${os}-${arch}.${ext}",
+    "portable": {
+      "artifactName": "lemon-chat-irc-${version}-portable-${arch}.${ext}"
+    },
+    "executableName": "lemon-irc",
+    "icon": "electron/icon.png"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

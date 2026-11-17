@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" width="160" height="160" role="img" aria-label="lemon-chat-irc logo">
+  <title>lemon-chat-irc</title>
+  <ellipse cx="80" cy="84" rx="58" ry="46" transform="rotate(-24 80 84)" fill="#ffd43b" stroke="#e8a400" stroke-width="5"/>
+  <path d="M28 112 L18 126 L36 120 Z" fill="#ffd43b" stroke="#e8a400" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M128 52 C134 40 146 36 152 40 C146 46 140 52 128 56 Z" fill="#69b34c" stroke="#3f8a2b" stroke-width="3" stroke-linejoin="round"/>
+  <rect x="44" y="58" width="74" height="48" rx="12" fill="#1f2a33"/>
+  <path d="M60 106 L56 120 L74 106 Z" fill="#1f2a33"/>
+  <path d="M73 66 L67 98 M91 66 L85 98 M62 76 H98 M60 88 H96" stroke="#ffd43b" stroke-width="5" stroke-linecap="round"/>
+</svg>

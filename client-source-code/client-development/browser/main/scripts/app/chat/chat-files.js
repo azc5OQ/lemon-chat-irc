@@ -1,0 +1,1957 @@
+// handles file and picture attachment, encryption, receipt and download
+// chat.js sends uploads, messages.js renders received content and ui.js selects attachments
+// channel files use authenticated v2 envelopes. direct files use fresh keys wrapped for the recipient
+
+// above this limit the server settings tab shows a warning, because one transfer holds
+// several temporary encoded buffers in memory
+var FILE_UPLOAD_WARNING_MB = 20;
+
+// remember the key set that decrypted a header so the larger body does not need every historical key set
+var chat_file_keys_by_file_id = {};
+var chat_files_pending_reader = null;
+
+/**
+ * @brief aborts and clears the active attachment reader
+ *
+ * @return void
+ */
+function chat_files__cancel_pending_read()
+{
+    const reader = chat_files_pending_reader;
+    chat_files_pending_reader = null;
+    if (reader !== null && reader.readyState === 1)
+    {
+        reader.abort();
+    }
+}
+
+
+/**
+ * @brief tells the server which new pictures and files this device wants to block
+ *
+ * @return void
+ */
+function chat_files__send_receive_preferences()
+{
+    if (g_is_authenticated)
+    {
+        connection__send_message_object(
+        {
+            message: Object.assign({ type: "set_attachment_receive_preferences" }, g_attachment_receive_preferences)
+        });
+    }
+}
+
+/**
+ * @brief shows the receive choices allowed by the connected server
+ *
+ * @return void
+ */
+function chat_files__refresh_receive_preferences_controls()
+{
+    let preference = null;
+    let element = null;
+    let allowed = false;
+    let reason = "";
+    let reason_element = null;
+
+    if (typeof document === "undefined")
+    {
+        return;
+    }
+    for (preference of Object.keys(g_attachment_receive_preferences))
+    {
+        element = document.getElementById("local-settings-" + preference.replaceAll("_", "-"));
+        if (element == null)
+        {
+            continue;
+        }
+        allowed = g_is_authenticated && g_server_policy["is_" + preference.replace(/^block_/, "blocking_") + "_active"] === true;
+        element.disabled = !allowed;
+        element.checked = allowed && g_attachment_receive_preferences[preference];
+
+        // say why not
+        reason = allowed ? "" : !g_is_authenticated ? "cannot be changed while you are not connected to a server" : "cannot be changed on this server: its administrator has not turned on \"allow clients to " + preference.replaceAll("_", " ") + "\" in the server settings";
+        reason_element = element.closest("label").querySelector(".local-settings-attachment-preference-state");
+        reason_element.textContent = reason;
+        reason_element.style.display = (reason == "") ? "none" : "";
+        element.closest("label").title = allowed ? "Applies to new attachments; transfers already started will finish." : reason;
+    }
+}
+
+/**
+ * @brief restores this device's receive choices and sends changes to the server
+ *
+ * @return void
+ */
+function chat_files__setup_receive_preferences_controls()
+{
+    let preference = null;
+    let element = null;
+
+    for (preference of Object.keys(g_attachment_receive_preferences))
+    {
+        g_attachment_receive_preferences[preference] = utils__storage_get("lemon_" + preference) === "1";
+        element = document.getElementById("local-settings-" + preference.replaceAll("_", "-"));
+        element.onchange = function()
+        {
+            let field = this.dataset.attachmentPreference;
+
+            g_attachment_receive_preferences[field] = this.checked;
+            utils__storage_set("lemon_" + field, this.checked ? "1" : "0");
+            chat_files__send_receive_preferences();
+        };
+    }
+    chat_files__refresh_receive_preferences_controls();
+}
+
+// the circumference of the progress ring (radius 15.5). stroke-dashoffset counts down from this value
+var CHAT_FILE_RING_LENGTH = 97.4;
+
+// maps file extensions to an icon kind. the kind picks the badge colour of the file icon in layout.style
+var CHAT_FILE_KINDS = {
+    archive: ["zip", "rar", "7z", "tar", "gz", "bz2", "xz", "tgz", "iso"],
+    pdf: ["pdf"],
+    document: ["doc", "docx", "odt", "rtf", "txt", "md", "epub"],
+    sheet: ["xls", "xlsx", "ods", "csv"],
+    slides: ["ppt", "pptx", "odp"],
+    code: ["js", "ts", "py", "c", "h", "cpp", "hpp", "java", "cs", "go", "rs", "php", "rb", "sh", "bat", "html", "css", "json", "xml", "yml", "yaml", "sql"],
+    audio: ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus", "wma"],
+    video: ["mp4", "mkv", "avi", "mov", "webm", "wmv", "m4v"],
+    image: ["png", "jpg", "jpeg", "gif", "ico", "bmp", "webp", "svg", "tiff", "heic"],
+    executable: ["exe", "msi", "apk", "dmg", "deb", "rpm", "appimage"]
+};
+
+// the extensions the picture picker accepts. anything else dropped on the chat is sent as a file
+var CHAT_PICTURE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "ico", "webp", "bmp", "svg", "avif"];
+
+// Base64 and encryption helpers shared by the page, workers and Node
+
+/**
+ * @brief encodes bytes as base64 with bounded native btoa calls
+ *
+ * @param Uint8Array bytes -> the bytes
+ *
+ * @return string the base64 text
+ */
+function chat_files__fast_bytes_to_base64(bytes)
+{
+    if (typeof btoa !== "function")
+    {
+        return utils__bytesToBase64String(bytes);
+    }
+
+    let chunks = [];
+    const step = 0x8000;
+
+    for (let i = 0; i < bytes.length; i += step)
+    {
+        chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + step)));
+    }
+
+    return btoa(chunks.join(""));
+}
+
+/**
+ * @brief decodes base64 into bytes and rejects malformed input
+ *
+ * @param string base64_string -> the base64 text
+ *
+ * @return Uint8Array the bytes
+ */
+function chat_files__fast_base64_to_bytes(base64_string)
+{
+    if (typeof atob !== "function")
+    {
+        return new Uint8Array(utils__base64StringToBytes(base64_string));
+    }
+
+    let binary = atob(base64_string);
+    let bytes = new Uint8Array(binary.length);
+
+    for (let i = 0; i < binary.length; i++)
+    {
+        bytes[i] = binary.charCodeAt(i);
+    }
+
+    return bytes;
+}
+
+// version 2 derives independent encryption and MAC keys from all four content
+// keys and IVs. a legacy receiver cannot mistake stripped v2 data for valid v1
+/**
+ * @brief derives four encryption keys and a MAC key for a version 2 attachment
+ *
+ * @param array keys -> four AES key and IV pairs
+ * @param Uint8Array iv -> attachment IV with 16 bytes
+ *
+ * @return array -> 160 bytes of derived key material
+ *
+ * @throws Error -> the keys or IV have invalid lengths
+ */
+function chat_files__derive_v2(keys, iv)
+{
+    if (!Array.isArray(keys) || keys.length !== 4 || iv.length !== 16)
+    {
+        throw new Error("Invalid attachment keys");
+    }
+    const material = [];
+    for (const key of keys)
+    {
+        if (!key || key.key_bytes.length !== 32 || key.iv_bytes.length !== 16)
+        {
+            throw new Error("Invalid attachment key length");
+        }
+        material.push(...key.key_bytes, ...key.iv_bytes);
+    }
+    return keys___hkdf_sha256(material, iv, aesjs.utils.utf8.toBytes("lemon-attachment-v2"), 160);
+}
+
+/**
+ * @brief authenticates the attachment format label, IV and ciphertext
+ *
+ * @param array derived -> derived encryption and MAC key material
+ * @param Uint8Array iv -> attachment IV
+ * @param Uint8Array data -> encrypted attachment bytes
+ *
+ * @return Uint8Array -> SHA256 HMAC tag
+ */
+function chat_files__tag_v2(derived, iv, data)
+{
+    const mac = derived.slice(128);
+    const ipad = new Uint8Array(64).fill(0x36);
+    const opad = new Uint8Array(64).fill(0x5c);
+    for (let i = 0; i < mac.length; i++)
+    {
+        ipad[i] ^= mac[i];
+        opad[i] ^= mac[i];
+    }
+    const inner = _sha256.create().update(ipad).update("lemon-attachment-v2").update(iv).update(data).array();
+    return new Uint8Array(_sha256.create().update(opad).update(inner).array());
+}
+
+/**
+ * @brief encrypts padded file JSON into an authenticated version 2 envelope
+ *
+ * @param array keys -> four content key layers, each with key_bytes and iv_bytes
+ * @param string string_to_encrypt -> header or file body plaintext
+ * @param number minimum_padded_bytes -> 1024 for headers. file bodies use 4096
+ *
+ * @return string -> serialized {v, iv, data, tag} object
+ */
+function chat_files__encrypt_string_with_aes_keys_fast(keys, string_to_encrypt, minimum_padded_bytes)
+{
+    const floor = typeof minimum_padded_bytes === "number" ? minimum_padded_bytes : 1024;
+    if (!Number.isSafeInteger(floor) || floor < 0 || floor > 4096)
+    {
+        throw new Error("Invalid attachment padding");
+    }
+    const source = aesjs.utils.utf8.toBytes(string_to_encrypt);
+    let data = new Uint8Array(Math.max(source.length, floor));
+    data.set(source);
+    const iv = crypto.getRandomValues(new Uint8Array(16));
+    const derived = chat_files__derive_v2(keys, iv);
+    for (let i = 0; i < keys.length; i++)
+    {
+        const counter = keys[i].iv_bytes.map((byte, index) => byte ^ iv[index]);
+        data = new aesjs.ModeOfOperation.ctr(derived.slice(i * 32, i * 32 + 32), new aesjs.Counter(counter)).encrypt(data);
+    }
+    return JSON.stringify(
+    {
+        v: 2,
+        iv: chat_files__fast_bytes_to_base64(iv),
+        data: chat_files__fast_bytes_to_base64(data),
+        tag: chat_files__fast_bytes_to_base64(chat_files__tag_v2(derived, iv, data))
+    });
+}
+
+/**
+ * @brief authenticates version 2 attachments or decodes legacy content before removing encryption
+ *
+ * @param array keys -> AES key and IV pairs in encryption order
+ * @param string ciphertext -> version 2 JSON envelope or legacy base64 content
+ *
+ * @return string|null -> decrypted UTF8 text, or null for invalid content
+ */
+function chat_files__decrypt_base64_with_aes_keys_fast(keys, ciphertext)
+{
+    try
+    {
+        let data;
+        let iv = new Uint8Array(16);
+        let derived = null;
+        if (ciphertext[0] === "{")
+        {
+            const envelope = JSON.parse(ciphertext);
+            if (envelope.v !== 2 || Object.keys(envelope).length !== 4 || typeof envelope.iv !== "string" || typeof envelope.data !== "string" || typeof envelope.tag !== "string" || envelope.iv.length !== 24 || envelope.tag.length !== 44)
+            {
+                return null;
+            }
+            iv = chat_files__fast_base64_to_bytes(envelope.iv);
+            data = chat_files__fast_base64_to_bytes(envelope.data);
+            const tag = chat_files__fast_base64_to_bytes(envelope.tag);
+            derived = chat_files__derive_v2(keys, iv);
+            const expected = chat_files__tag_v2(derived, iv, data);
+            let mismatch = tag.length ^ expected.length;
+            for (let i = 0; i < expected.length; i++)
+            {
+                mismatch |= tag[i] ^ expected[i];
+            }
+            if (mismatch !== 0)
+            {
+                return null;
+            }
+        }
+        else
+        {
+            // accept legacy file content only when reading existing transfers
+            data = chat_files__fast_base64_to_bytes(ciphertext);
+        }
+        for (let i = keys.length - 1; i >= 0; i--)
+        {
+            const counter = keys[i].iv_bytes.map((byte, index) => byte ^ iv[index]);
+            const key = derived ? derived.slice(i * 32, i * 32 + 32) : keys[i].key_bytes;
+            data = new aesjs.ModeOfOperation.ctr(key, new aesjs.Counter(counter)).decrypt(data);
+        }
+        const end = data.indexOf(0);
+        if (end >= 0 && data.subarray(end).some(byte => byte !== 0))
+        {
+            return null;
+        }
+        return new TextDecoder("utf-8", {fatal: true}).decode(end >= 0 ? data.subarray(0, end) : data);
+    }
+    catch (error)
+    {
+        return null;
+    }
+}
+
+/**
+ * @brief derives direct file encryption and authentication keys from four fresh key pairs
+ *
+ * @param array keys -> four fresh content keys and IVs
+ *
+ * @return array four AES keys followed by one HMAC key
+ */
+function chat_files__derive_direct(keys)
+{
+    let material = [];
+    let key = null;
+
+    if (!keys__are_message_keys_valid(keys))
+    {
+        throw new Error("Invalid direct file keys");
+    }
+    for (key of keys)
+    {
+        material = material.concat(key.key_bytes, key.iv_bytes);
+    }
+    return keys___hkdf_sha256(material, new Uint8Array(32), aesjs.utils.utf8.toBytes("lemon-direct-attachment"), 160);
+}
+
+/**
+ * @brief calculates the existing file check without a separate message IV
+ *
+ * @param array derived -> encryption and checking keys
+ * @param Uint8Array data -> ciphertext
+ *
+ * @return Uint8Array HMAC-SHA256 bytes
+ */
+function chat_files__tag_direct(derived, data)
+{
+    let mac = derived.slice(128);
+    let ipad = new Uint8Array(64).fill(0x36);
+    let opad = new Uint8Array(64).fill(0x5c);
+    let inner = null;
+    let index = 0;
+
+    for (index = 0; index < mac.length; index++)
+    {
+        ipad[index] ^= mac[index];
+        opad[index] ^= mac[index];
+    }
+    inner = _sha256.create().update(ipad).update("lemon-direct-attachment").update(data).array();
+    return new Uint8Array(_sha256.create().update(opad).update(inner).array());
+}
+
+/**
+ * @brief encrypts a direct file part with the four key IVs and its file check
+ *
+ * @param array keys -> four fresh content keys and IVs
+ * @param string plaintext -> file header or body JSON
+ * @param number padding -> minimum plaintext size, defaults to 1024 bytes
+ *
+ * @return string|null internal {data,tag} envelope, or null on failure
+ */
+function chat_files__encrypt_direct_file_content(keys, plaintext, padding)
+{
+    let floor = typeof padding === "number" ? padding : 1024;
+    let source = null;
+    let data = null;
+    let derived = null;
+    let result = null;
+    let index = 0;
+
+    try
+    {
+        if (typeof plaintext !== "string" || plaintext.length > 40 * 1024 * 1024 || !Number.isSafeInteger(floor) || floor < 0 || floor > 4096)
+        {
+            return null;
+        }
+        derived = chat_files__derive_direct(keys);
+        source = aesjs.utils.utf8.toBytes(plaintext);
+        data = new Uint8Array(Math.max(source.length, floor));
+        data.set(source);
+
+        // use each key's own IV
+        for (index = 0; index < keys.length; index++)
+        {
+            data = keys__aes_ctr(derived.slice(index * 32, index * 32 + 32), keys[index].iv_bytes, data);
+        }
+        result = JSON.stringify(
+        {
+            data: keys___packet_to_base64(data),
+            tag: keys___packet_to_base64(chat_files__tag_direct(derived, data))
+        });
+        return result.length <= 40 * 1024 * 1024 ? result : null;
+    }
+    catch (error)
+    {
+        return null;
+    }
+}
+
+/**
+ * @brief checks and decrypts a direct file part using its four key IVs
+ *
+ * @param array keys -> recovered content keys and IVs
+ * @param string content -> internal {data,tag} envelope
+ *
+ * @return string|null plaintext, or null for invalid content
+ */
+function chat_files__decrypt_direct_file_content(keys, content)
+{
+    let body = null;
+    let data = null;
+    let tag = null;
+    let derived = null;
+    let expected = null;
+    let mismatch = 0;
+    let end = 0;
+    let index = 0;
+
+    try
+    {
+        if (typeof content !== "string" || content.length > 40 * 1024 * 1024)
+        {
+            return null;
+        }
+        body = JSON.parse(content);
+        if (body == null || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 2)
+        {
+            return null;
+        }
+        data = keys___packet_from_base64(body.data);
+        tag = keys___packet_from_base64(body.tag);
+        if (data == null || !data.length || tag == null || tag.length !== 32)
+        {
+            return null;
+        }
+
+        // check the file before decryption
+        derived = chat_files__derive_direct(keys);
+        expected = chat_files__tag_direct(derived, data);
+        for (index = 0; index < expected.length; index++)
+        {
+            mismatch |= tag[index] ^ expected[index];
+        }
+        if (mismatch !== 0)
+        {
+            return null;
+        }
+        for (index = keys.length - 1; index >= 0; index--)
+        {
+            data = keys__aes_ctr(derived.slice(index * 32, index * 32 + 32), keys[index].iv_bytes, data);
+        }
+        end = data.indexOf(0);
+        if (end >= 0 && data.subarray(end).some(function(byte)
+        {
+            return byte !== 0;
+        }))
+        {
+            return null;
+        }
+        return new TextDecoder("utf-8", {fatal: true}).decode(end >= 0 ? data.subarray(0, end) : data);
+    }
+    catch (error)
+    {
+        return null;
+    }
+}
+
+/**
+ * @brief encrypts direct content and wraps its keys for the recipient
+ * message_keys holds the RSA envelope. message_value holds the encrypted content
+ *
+ * @param string receiver_public_key -> the receiver's public key string
+ * @param string plaintext -> the text to wrap
+ * @param number minimum_padded_bytes -> the padding floor, see chat_files__encrypt_direct_file_content
+ *
+ * @return string|null the envelope as json, null when the receiver's public key is unusable
+ */
+function chat_files__create_direct_chat_file_envelope(receiver_public_key, plaintext, minimum_padded_bytes)
+{
+    let keys = keys__create_random_message_keys();
+    let content = chat_files__encrypt_direct_file_content(keys, plaintext, minimum_padded_bytes);
+    let envelope = keys__seal_direct_content(receiver_public_key, keys, content);
+
+    return envelope == null ? null : JSON.stringify(envelope);
+}
+
+/**
+ * @brief opens a direct envelope with our own rsa key
+ *
+ * @param string envelope_json_string -> the envelope as json
+ *
+ * @return string|null the plaintext, null when anything about the envelope is wrong
+ */
+function chat_files__open_direct_chat_file_envelope(envelope_json_string)
+{
+    let content = null;
+
+    try
+    {
+        content = keys__open_direct_content(JSON.parse(envelope_json_string), g_my_rsa_key_object);
+    }
+    catch (error)
+    {
+        return null;
+    }
+    return content == null ? null : chat_files__decrypt_direct_file_content(content.keys, content.value);
+}
+
+/**
+ * @brief the channel key sets a file could be encrypted with: the hinted set first, then the current channel keys, then the historic ones
+ *
+ * @param array|null hinted_keys -> the set that worked before, or null
+ *
+ * @return array the key sets to try, in that order
+ */
+function chat_files__get_channel_key_candidates(hinted_keys)
+{
+    return keys__get_channel_key_candidates(hinted_keys);
+}
+
+/**
+ * @brief decrypts a channel file header and remembers the successful key set for its body
+ *
+ * @param number file_id -> the transfer
+ * @param string header_base64 -> the encrypted header
+ *
+ * @return object|null { name, size, mime }, null when no key set fits
+ */
+function chat_files__decrypt_channel_chat_file_header(file_id, header_base64)
+{
+    let candidates = chat_files__get_channel_key_candidates(null);
+
+    for (let i = 0; i < candidates.length; i++)
+    {
+        let header = chat_files__parse_chat_file_header(chat_files__decrypt_base64_with_aes_keys_fast(candidates[i], keys__open_channel_content(candidates[i], header_base64)));
+
+        if (header != null)
+        {
+            const retained = Object.keys(chat_file_keys_by_file_id);
+            while (retained.length >= 16)
+            {
+                delete chat_file_keys_by_file_id[retained.shift()];
+            }
+            chat_file_keys_by_file_id[file_id] = candidates[i];
+            return header;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * @brief decrypts a channel file body using its cached key set or the remaining candidates
+ *
+ * @param number file_id -> the transfer
+ * @param string body_base64 -> the encrypted body
+ *
+ * @return object|null { name, size, mime, base64 }, null when no key set fits
+ */
+function chat_files__decrypt_channel_chat_file_body(file_id, body_base64)
+{
+    let candidates = chat_files__get_channel_key_candidates(chat_file_keys_by_file_id[file_id]);
+
+    delete chat_file_keys_by_file_id[file_id];
+
+    for (let i = 0; i < candidates.length; i++)
+    {
+        let file = chat_files__parse_decrypted_chat_file_body(chat_files__decrypt_base64_with_aes_keys_fast(candidates[i], keys__open_channel_content(candidates[i], body_base64)));
+
+        if (file != null)
+        {
+            return file;
+        }
+    }
+
+    return null;
+}
+
+// file message bodies
+
+/**
+ * @brief serializes the file details needed to display a receiving card
+ *
+ * @param object file -> { name, size, mime }
+ *
+ * @return string the json
+ */
+function chat_files__build_chat_file_header_json(file)
+{
+    return JSON.stringify({ name: file.name, size: file.size, mime: file.mime });
+}
+
+/**
+ * @brief serializes the file body for encrypted upload
+ *
+ * @param object file -> { name, size, mime, base64 }
+ *
+ * @return string the json
+ */
+function chat_files__build_chat_file_body_json(file)
+{
+    return JSON.stringify({ name: file.name, size: file.size, mime: file.mime, data: file.base64 });
+}
+
+/**
+ * @brief validates decrypted file JSON and cleans its name and MIME type
+ *
+ * @param string text -> the decrypted text
+ *
+ * @return object|null the parsed object, null when the text is not a file json
+ */
+function chat_files__parse_chat_file_json(text)
+{
+    if (typeof text !== "string" || text.charAt(0) !== "{")
+    {
+        return null;
+    }
+
+    let parsed = null;
+
+    try
+    {
+        parsed = JSON.parse(text);
+    }
+    catch (parse_error)
+    {
+        return null;
+    }
+
+    if (parsed == null || typeof parsed.name !== "string")
+    {
+        return null;
+    }
+
+    return {
+        name: chat_files__sanitize_file_name(parsed.name),
+        size: (typeof parsed.size === "number" && parsed.size > 0) ? Math.floor(parsed.size) : 0,
+        mime: chat_files__sanitize_mime_type(parsed.mime),
+        data: parsed.data
+    };
+}
+
+/**
+ * @brief parses a decrypted attachment header into its name, size and MIME type
+ *
+ * @param string text -> the decrypted text
+ *
+ * @return object|null the header, null when the text is not one
+ */
+function chat_files__parse_chat_file_header(text)
+{
+    let parsed = chat_files__parse_chat_file_json(text);
+
+    if (parsed == null)
+    {
+        return null;
+    }
+
+    return { name: parsed.name, size: parsed.size, mime: parsed.mime };
+}
+
+/**
+ * @brief parses a decrypted attachment body and checks its base64 data
+ *
+ * @param string text -> the decrypted text
+ *
+ * @return object|null the body, null when the text is not one
+ */
+function chat_files__parse_decrypted_chat_file_body(text)
+{
+    let parsed = chat_files__parse_chat_file_json(text);
+
+    if (parsed == null || typeof parsed.data !== "string" || /^[A-Za-z0-9+/]*={0,2}$/.test(parsed.data) == false)
+    {
+        return null;
+    }
+
+    return { name: parsed.name, size: parsed.size, mime: parsed.mime, base64: parsed.data };
+}
+
+// file names, sizes and icons
+
+/**
+ * @brief cleans a file name: no path separators or control characters, at most 255 characters, never empty
+ *
+ * @param string name -> the name as received
+ *
+ * @return string the cleaned name, "file" when nothing usable is left
+ */
+function chat_files__sanitize_file_name(name)
+{
+    let result = ("" + (name == null ? "" : name)).replace(/[\\\/\x00-\x1f\x7f]/g, "_").trim();
+
+    if (result.length > 255)
+    {
+        result = result.slice(0, 255);
+    }
+
+    if (result.length == 0 || result == "." || result == "..")
+    {
+        result = "file";
+    }
+
+    return result;
+}
+
+/**
+ * @brief cleans a mime type: lowercase, at most 100 characters, of the type/subtype shape
+ *
+ * @param string mime -> the type as received
+ *
+ * @return string the cleaned type, "application/octet-stream" when it is not a valid one
+ */
+function chat_files__sanitize_mime_type(mime)
+{
+    let text = "" + (mime == null ? "" : mime);
+
+    if (/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(text) == false || text.length > 100)
+    {
+        return "application/octet-stream";
+    }
+
+    return text.toLowerCase();
+}
+
+/**
+ * @brief the icon kind of a file extension, from CHAT_FILE_KINDS
+ *
+ * @param string extension -> the extension without the dot
+ *
+ * @return string the kind, "generic" when unknown
+ */
+function chat_files__get_chat_file_kind(extension)
+{
+    for (let kind in CHAT_FILE_KINDS)
+    {
+        if (CHAT_FILE_KINDS[kind].indexOf(extension) != -1)
+        {
+            return kind;
+        }
+    }
+
+    return "generic";
+}
+
+/**
+ * @brief checks the file MIME type and extension for an image
+ *
+ * @param File file -> the file
+ *
+ * @return boolean true for a picture
+ */
+function chat_files__is_chat_picture_file(file)
+{
+    if (file == null)
+    {
+        return false;
+    }
+
+    // the browser's own type is trusted first, so a dropped image behaves like one picked from
+    // disk. the extension is the fallback for a drop that carried no type
+    if (typeof file.type === "string" && file.type.indexOf("image/") === 0)
+    {
+        return true;
+    }
+
+    return CHAT_PICTURE_EXTENSIONS.indexOf(chat__get_file_extension(file.name)) != -1;
+}
+
+/**
+ * @brief formats a byte count using readable size units
+ *
+ * @param number bytes -> the size
+ *
+ * @return string the formatted size, or an empty string for invalid input
+ */
+function chat_files__format_file_size(bytes)
+{
+    if (typeof bytes !== "number" || bytes < 0)
+    {
+        return "";
+    }
+
+    if (bytes < 1024)
+    {
+        return bytes + " B";
+    }
+
+    if (bytes < 1024 * 1024)
+    {
+        return (bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0) + " KB";
+    }
+
+    if (bytes < 1024 * 1024 * 1024)
+    {
+        return (bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 2 : 1) + " MB";
+    }
+
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+/**
+ * @brief the file icon: a page with a folded corner and, for a known extension, a coloured badge carrying it
+ *
+ * @param string file_name -> the name the extension is taken from
+ * @param string css_class -> the class of the svg
+ *
+ * @return string the svg markup
+ */
+function chat_files__generate_chat_file_icon_svg(file_name, css_class)
+{
+    let extension = chat__get_file_extension(file_name);
+    let label = (extension.length > 0 && extension.length <= 4) ? extension.toUpperCase() : "";
+    let badge = "";
+
+    if (label.length > 0)
+    {
+        badge = "<rect class=\"chat-file-icon-badge\" x=\"1\" y=\"27\" width=\"38\" height=\"16\" rx=\"3\"></rect>" + "<text class=\"chat-file-icon-text\" x=\"20\" y=\"38.5\" text-anchor=\"middle\">" + label + "</text>";
+    }
+
+    return "<svg class=\"" + css_class + " chat-file-kind-" + chat_files__get_chat_file_kind(extension) + "\" viewBox=\"0 0 40 48\" aria-hidden=\"true\">" + "<path class=\"chat-file-icon-page\" d=\"M7 1h18l11 11v32a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V4a3 3 0 0 1 3-3z\"></path>" + "<path class=\"chat-file-icon-fold\" d=\"M25 1v11h11\"></path>" + badge + "</svg>";
+}
+
+// file cards in chat
+
+/**
+ * @brief builds the file card markup
+ *
+ * @param object options -> { key, name, size, is_local, local_message_id, is_receiving }. key is the server message id for received files, or "local-N" for our own echo
+ *
+ * @return string the card markup
+ */
+function chat_files__generate_chat_file_card_html(options)
+{
+    let name_html = chat__sanitize_string(options.name);
+    let size_text = (options.size > 0) ? chat_files__format_file_size(options.size) : "";
+    let classes = "chat-file-card";
+    let attributes = " data-chat-file-key=\"" + options.key + "\"";
+
+    if (options.is_local == true)
+    {
+        classes += " local-client-chat-file imgnotsentyet";
+        attributes += " data-single-chat-message-local-message-id=\"" + options.local_message_id + "\" data-single-chat-message-server-message-id=\"unspecified\"";
+    }
+    else
+    {
+        attributes += " id=\"chat-file-card-" + options.key + "\" data-single-chat-message-server-message-id=\"" + options.key + "\"";
+    }
+
+    if (options.is_receiving == true)
+    {
+        classes += " chat-file-receiving";
+    }
+
+    return "<div class=\"" + classes + "\"" + attributes + ">" + "<div class=\"chat-file-icon-wrap\">" + chat_files__generate_chat_file_icon_svg(options.name, "chat-file-icon") + "</div>" + "<div class=\"chat-file-info\">" + "<p class=\"chat-file-name\" title=\"" + name_html + "\">" + name_html + "</p>" + "<p class=\"chat-file-size\">" + size_text + "</p>" + "<p class=\"chat-file-status\"></p>" + "</div>" + "<div class=\"chat-file-progress\" title=\"receiving\">" + "<svg viewBox=\"0 0 36 36\">" + "<circle class=\"chat-file-ring-track\" cx=\"18\" cy=\"18\" r=\"15.5\"></circle>" + "<circle class=\"chat-file-ring-bar\" cx=\"18\" cy=\"18\" r=\"15.5\"></circle></svg>" + "<span class=\"chat-file-progress-text\">0%</span>" + "</div>" + "<button type=\"button\" class=\"chat-file-download\" title=\"download\"></button>" + "</div>";
+}
+
+/**
+ * @brief finds a file card or picture progress indicator by its transfer key
+ *
+ * @param string|number key -> the transfer key
+ *
+ * @return Element|null the element, null when there is none
+ */
+function chat_files__get_chat_file_card_by_key(key)
+{
+    return document.querySelector('[data-chat-file-key="' + key + '"]');
+}
+
+/**
+ * @brief registers an incoming transfer with its total size, so its progress ring can be moved
+ *
+ * @param number file_id -> the transfer
+ * @param number encrypted_size -> the encrypted size in characters, 0 when unknown
+ *
+ * @return void
+ */
+function chat_files__begin_chat_file_transfer(file_id, encrypted_size)
+{
+    chat_files__expire_receiving();
+    const reserved = received_files.reduce((total, file) => total + file.expected_size, 0);
+    if (!Number.isSafeInteger(file_id) || file_id < 0 || !Number.isSafeInteger(encrypted_size) || encrypted_size <= 0 || encrypted_size > 48 * 1024 * 1024 || received_files.length >= 8 || reserved + encrypted_size > 64 * 1024 * 1024 || received_files.some(file => file.file_id === file_id))
+    {
+        return false;
+    }
+    const now = Date.now();
+    received_files.push(
+    {
+        file_id: file_id,
+        expected_size: encrypted_size,
+        file_content_base64: "",
+        timestamp_started: now,
+        timestamp_last_received: now
+    });
+    g_chat_file_transfers[file_id] = { encrypted_size: encrypted_size };
+    if (chat_files_receive_timer === null)
+    {
+        chat_files_receive_timer = setInterval(chat_files__expire_receiving, 5000);
+    }
+    return true;
+}
+
+/**
+ * @brief the progress ring a file card shows, for an incoming picture, because a picture has no card of its own
+ *
+ * @param number picture_id -> the transfer
+ *
+ * @return string the ring markup
+ */
+function chat_files__generate_chat_picture_progress_html(picture_id)
+{
+    return "<div class=\"chat-picture-progress\" data-chat-file-key=\"" + picture_id + "\">" + "<div class=\"chat-picture-progress-ring\">" + "<svg viewBox=\"0 0 36 36\">" + "<circle class=\"chat-file-ring-track\" cx=\"18\" cy=\"18\" r=\"15.5\"></circle>" + "<circle class=\"chat-file-ring-bar\" cx=\"18\" cy=\"18\" r=\"15.5\"></circle></svg>" + "<span class=\"chat-file-progress-text\">0%</span>" + "</div>" + "<span class=\"chat-picture-progress-label\">receiving image ...</span>" + "</div>";
+}
+
+/**
+ * @brief removes the progress ring and forgets the transfer, once the picture arrived or its transfer died
+ *
+ * @param number picture_id -> the transfer
+ *
+ * @return void
+ */
+function chat_files__finish_chat_picture_progress(picture_id)
+{
+    delete g_chat_file_transfers[picture_id];
+
+    let ring = document.querySelector('.chat-picture-progress[data-chat-file-key="' + picture_id + '"]');
+
+    if (ring != null)
+    {
+        ring.remove();
+    }
+}
+
+/**
+ * @brief releases receive state and marks a picture as failed without replacing a deletion notice
+ *
+ * @param number picture_id -> incoming picture ID
+ *
+ * @return boolean -> true when a picture or progress element was found
+ */
+function chat_files__fail_chat_picture(picture_id)
+{
+    if (!Number.isSafeInteger(picture_id) || picture_id < 0)
+    {
+        return false;
+    }
+    received_files = received_files.filter(file => file.file_id !== picture_id);
+    delete g_chat_file_transfers[picture_id];
+    const picture = document.getElementById("chat-picture-img-" + picture_id);
+    if (picture != null && picture.classList.contains("chat-picture-deleted"))
+    {
+        chat_files__finish_chat_picture_progress(picture_id);
+        return true;
+    }
+    const progress = document.querySelector('.chat-picture-progress[data-chat-file-key="' + picture_id + '"]');
+    if (progress != null)
+    {
+        const ring = progress.querySelector(".chat-picture-progress-ring");
+        if (ring != null)
+        {
+            ring.remove();
+        }
+        const label = progress.querySelector(".chat-picture-progress-label");
+        if (label != null)
+        {
+            label.textContent = "could not receive this image";
+        }
+        progress.setAttribute("role", "status");
+    }
+    if (picture != null)
+    {
+        picture.alt = "Image could not be received";
+    }
+    return progress != null || picture != null;
+}
+
+/**
+ * @brief moves the progress ring from how many characters of the transfer arrived so far
+ *
+ * @param number file_id -> the transfer
+ * @param number received_chars -> characters received so far
+ *
+ * @return void
+ */
+function chat_files__update_chat_file_progress(file_id, received_chars)
+{
+    let transfer = g_chat_file_transfers[file_id];
+
+    if (transfer == null)
+    {
+        return;
+    }
+
+    let ratio = (transfer.encrypted_size > 0) ? Math.min(1, received_chars / transfer.encrypted_size) : 0;
+    chat_files__render_chat_file_progress(file_id, ratio);
+}
+
+/**
+ * @brief paints a ratio onto a transfer's ring and its percentage text
+ *
+ * @param number file_id -> the transfer
+ * @param number ratio -> 0 to 1
+ *
+ * @return void
+ */
+function chat_files__render_chat_file_progress(file_id, ratio)
+{
+    let card = chat_files__get_chat_file_card_by_key(file_id);
+
+    if (card == null)
+    {
+        return;
+    }
+
+    let bar = card.querySelector(".chat-file-ring-bar");
+    let text = card.querySelector(".chat-file-progress-text");
+
+    if (bar != null)
+    {
+        bar.style.strokeDashoffset = (CHAT_FILE_RING_LENGTH * (1 - ratio)).toFixed(2);
+    }
+
+    if (text != null)
+    {
+        text.textContent = Math.round(ratio * 100) + "%";
+    }
+}
+
+/**
+ * @brief enables a card's download button and points it at the stored file
+ *
+ * @param Element card -> the file card
+ * @param string|number key -> the transfer key
+ *
+ * @return void
+ */
+function chat_files__wire_chat_file_download_button(card, key)
+{
+    let button = card.querySelector(".chat-file-download");
+
+    if (button == null)
+    {
+        return;
+    }
+
+    button.disabled = false;
+    button.onclick = function(event)
+    {
+        event.stopPropagation();
+        chat_files__download_chat_file(key);
+    };
+}
+
+/**
+ * @brief stores a received file for its live card and removes its progress indicator
+ *
+ * @param string|number key -> the transfer key
+ * @param object file -> { name, size, mime, base64 }
+ *
+ * @return void
+ */
+function chat_files__finish_chat_file_card(key, file)
+{
+    delete g_chat_file_transfers[key];
+
+    let card = chat_files__get_chat_file_card_by_key(key);
+
+    // retain bytes only while a real file card exists
+    // ignore Node placeholders and cards removed by deletion or cleared history
+    if (card == null || card.isConnected !== true || card.classList.contains("chat-file-deleted"))
+    {
+        return card != null && card.classList.contains("chat-file-deleted");
+    }
+
+    g_chat_files_by_message_id[key] = file;
+    card.classList.remove("chat-file-receiving");
+
+    let name = card.querySelector(".chat-file-name");
+    let size = card.querySelector(".chat-file-size");
+
+    if (name != null)
+    {
+        name.textContent = file.name;
+        name.title = file.name;
+    }
+
+    if (size != null)
+    {
+        size.textContent = chat_files__format_file_size(file.size > 0 ? file.size : Math.floor(file.base64.length * 3 / 4));
+    }
+
+    chat_files__wire_chat_file_download_button(card, key);
+    return true;
+}
+
+/**
+ * @brief turns a card into its failed state with a status text
+ *
+ * @param Element|null card -> the file card, nothing happens for null
+ * @param string text -> the status text
+ *
+ * @return void
+ */
+function chat_files__mark_chat_file_card_failed(card, text)
+{
+    if (card == null || card.classList.contains("chat-file-deleted"))
+    {
+        return;
+    }
+
+    card.classList.remove("imgnotsentyet");
+    card.classList.remove("chat-file-receiving");
+    card.classList.add("chat-file-failed");
+
+    let status = card.querySelector(".chat-file-status");
+
+    if (status != null)
+    {
+        status.textContent = text;
+    }
+}
+
+/**
+ * @brief marks a refused local upload as failed
+ *
+ * @param number g_local_message_id -> the refused local message id, 0 for the newest unsent card
+ * @param string text -> the status text
+ *
+ * @return void
+ */
+function chat_files__mark_local_chat_file_card_failed(g_local_message_id, text)
+{
+    let card = null;
+
+    if (typeof g_local_message_id === "number" && g_local_message_id > 0)
+    {
+        card = document.querySelector('.local-client-chat-file[data-single-chat-message-local-message-id="' + g_local_message_id + '"]');
+    }
+    else
+    {
+        let unsent = document.querySelectorAll(".local-client-chat-file.imgnotsentyet");
+        card = (unsent.length > 0) ? unsent[unsent.length - 1] : null;
+    }
+
+    chat_files__mark_chat_file_card_failed(card, text);
+}
+
+/**
+ * @brief turns a card into its deleted state: forgets the file and the transfer, unwires the menu, leaves a "deleted" card
+ *
+ * @param Element|null card -> the file card, nothing happens for null
+ *
+ * @return void
+ */
+function chat_files__mark_chat_file_card_deleted(card)
+{
+    if (card == null)
+    {
+        return;
+    }
+
+    delete g_chat_files_by_message_id[card.getAttribute("data-chat-file-key")];
+    delete g_chat_file_transfers[card.getAttribute("data-chat-file-key")];
+    card.removeEventListener("mousedown", chat_files__chat_file_card_onrightclick);
+    card.className = "chat-file-card chat-file-deleted";
+    card.innerHTML = "<p class=\"chat-file-status\">deleted</p>";
+}
+
+/**
+ * @brief forgets the stored bytes of cards that no longer exist, after "clear chat" removed them
+ *
+ * @return void
+ */
+function chat_files__prune_chat_files_without_cards()
+{
+    for (let key in g_chat_files_by_message_id)
+    {
+        if (chat_files__get_chat_file_card_by_key(key) == null)
+        {
+            delete g_chat_files_by_message_id[key];
+        }
+    }
+}
+
+/**
+ * @brief the text for a refused file: uploads off, too big, receiver unavailable, private messages off, or the server's own reason
+ *
+ * @param string reason -> the reason code from the server
+ * @param number max_bytes -> the server's limit, for the "too big" text
+ *
+ * @return string the text to show
+ */
+function chat_files__explain_file_send_error(reason, max_bytes)
+{
+    if (reason == "server_ram_budget_reached")
+    {
+        return "The server has reached its RAM budget. Try uploading again later.";
+    }
+    if (reason == "receiver_blocked_attachment")
+    {
+        return "not sent: the receiver has blocked this type of attachment";
+    }
+    if (reason == "file_uploads_disabled")
+    {
+        return "file not sent: file uploads are not allowed on this server";
+    }
+
+    if (reason == "file_too_large")
+    {
+        return "file not sent: too big, this server allows up to " + chat_files__format_file_size(max_bytes);
+    }
+
+    if (reason == "receiver_unavailable")
+    {
+        return "file not sent: the receiver is not available (offline or idle)";
+    }
+
+    if (reason == "private_messages_disabled")
+    {
+        return "file not sent: private messages are disabled on this server";
+    }
+
+    return "file not sent: refused by the server (" + reason + ")";
+}
+
+/**
+ * @brief opens the file card's deletion menu
+ *
+ * @param object event -> the mouse event
+ *
+ * @return void
+ */
+function chat_files__chat_file_card_onrightclick(event)
+{
+    if (event.which != 3)
+    {
+        return;
+    }
+
+    let card = event.currentTarget;
+    let server_message_id = card.getAttribute("data-single-chat-message-server-message-id");
+
+    if (server_message_id == null || server_message_id == "unspecified")
+    {
+        return;
+    }
+
+    event.stopPropagation();
+
+    let old_menus = document.getElementsByClassName("chat-message-context-menu");
+
+    while (old_menus.length > 0)
+    {
+        old_menus[0].remove();
+    }
+
+    g_selected_server_chat_message_id = parseInt(server_message_id);
+
+    let contextmenu_html = "<div class=\"chat-message-context-menu\" style=\"top: " + event.clientY + "px; left: " + event.clientX + "px;\">" + "<div class='chat-message-context-menu-background'></div>" + "<div class='chat-message-context-menu-items'>" + "<p class='chat-message-context-menu-item' data-action='0'>delete</p>" + "</div></div>";
+
+    document.getElementById("contextmenus-container").insertAdjacentHTML("beforeend", contextmenu_html);
+
+    let items = document.getElementsByClassName("chat-message-context-menu-item");
+
+    for (let i = 0; i < items.length; i++)
+    {
+        items[i].addEventListener("mousedown", UI.chat_message_contextmenuitem_onclick);
+    }
+}
+
+// file download
+
+/**
+ * @brief saves a received file: the java side writes it into Downloads in the webview, a browser gets a blob download
+ *
+ * @param string|number key -> the transfer key
+ *
+ * @return void
+ */
+function chat_files__download_chat_file(key)
+{
+    let file = g_chat_files_by_message_id[key];
+
+    if (file == null)
+    {
+        utils__custom_alert("this file is no longer available");
+        return;
+    }
+
+    // the android webview can not save a blob url, so the java side writes the file into Downloads instead
+    if (typeof Android !== "undefined" && Android != null && typeof Android.JavaExportSaveFile === "function")
+    {
+        Android.JavaExportSaveFile(file.name, file.mime, file.base64);
+        return;
+    }
+
+    let bytes = null;
+
+    try
+    {
+        bytes = chat_files__fast_base64_to_bytes(file.base64);
+    }
+    catch (decode_error)
+    {
+        utils__custom_alert("the file data is damaged, it can not be saved");
+        return;
+    }
+
+    let url = URL.createObjectURL(new Blob([bytes], { type: file.mime }));
+    let anchor = document.createElement("a");
+
+    anchor.href = url;
+    anchor.download = file.name;
+    anchor.style.display = "none";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+
+    setTimeout(function()
+    {
+        URL.revokeObjectURL(url);
+    }, 60000);
+}
+
+// attachment selection, paste, drop and preview
+
+/**
+ * @brief previews a pasted image using the same limits as a picture picked from disk
+ *
+ * @param ClipboardEvent event -> paste event from the chat message box
+ *
+ * @return void
+ */
+function chat_files__chat_input_onpaste(event)
+{
+    let files = event.clipboardData == null ? null : event.clipboardData.files;
+    let file;
+
+    if (files == null)
+    {
+        return;
+    }
+    for (file of files)
+    {
+        if (file.type.indexOf("image/") === 0)
+        {
+            event.preventDefault();
+            chat_files__attach_chat_file_or_picture(file);
+            return;
+        }
+    }
+}
+
+/**
+ * @brief attaches a dropped file using the picture path when allowed
+ *
+ * @param File file -> the dropped file
+ *
+ * @return void
+ */
+function chat_files__attach_chat_file_or_picture(file)
+{
+    if (file == null)
+    {
+        return;
+    }
+
+    if (document.getElementById("chat-input-container-text-input").disabled == true)
+    {
+        utils__custom_alert("join a channel or open a private chat first");
+        return;
+    }
+
+    if (chat_files__is_chat_picture_file(file))
+    {
+        if (g_server_policy.is_chat_picture_allowed == false)
+        {
+            if (g_server_policy.is_file_upload_allowed == true && file.size <= g_server_policy.file_upload_max_size)
+            {
+                utils__custom_alert("inline pictures are disabled on this server, so the image goes as a file");
+                chat_files__attach_chat_file(file);
+                return;
+            }
+
+            utils__custom_alert("inline pictures are disabled on this server");
+            return;
+        }
+
+        if (file.size <= g_server_policy.chat_picture_max_size)
+        {
+            chat_files__attach_chat_picture(file);
+            return;
+        }
+
+        if (g_server_policy.is_file_upload_allowed == true && file.size <= g_server_policy.file_upload_max_size)
+        {
+            utils__custom_alert("image is over the server's " + chat_files__format_file_size(g_server_policy.chat_picture_max_size) + " picture limit, so it goes as a file - the receiver downloads it instead of seeing it inline");
+            chat_files__attach_chat_file(file);
+            return;
+        }
+
+        utils__custom_alert("image is too large to send as a picture (this server allows up to " + chat_files__format_file_size(g_server_policy.chat_picture_max_size) + ")");
+        return;
+    }
+
+    chat_files__attach_chat_file(file);
+}
+
+/**
+ * @brief prepares a picture for the next message and shows its preview
+ *
+ * @param File file -> the picture
+ *
+ * @return void
+ */
+function chat_files__attach_chat_picture(file)
+{
+    if (g_server_policy.is_chat_picture_allowed == false)
+    {
+        utils__custom_alert("inline pictures are disabled on this server");
+        return;
+    }
+
+    if (file.size > g_server_policy.chat_picture_max_size)
+    {
+        if (g_server_policy.is_file_upload_allowed == true && file.size <= g_server_policy.file_upload_max_size)
+        {
+            utils__custom_alert("image is too large to send as a picture (this server allows up to " + chat_files__format_file_size(g_server_policy.chat_picture_max_size) + "). use the paperclip to send it as a file");
+        }
+        else
+        {
+            utils__custom_alert("image is too large to send as a picture (this server allows up to " + chat_files__format_file_size(g_server_policy.chat_picture_max_size) + ")");
+        }
+
+        return;
+    }
+
+    chat_files__cancel_pending_read();
+    let reader = new FileReader();
+    const context = g_current_chat_context_id;
+    chat_files_pending_reader = reader;
+
+    reader.onload = function(event)
+    {
+        if (chat_files_pending_reader !== reader || context !== g_current_chat_context_id)
+        {
+            return;
+        }
+        chat_files_pending_reader = null;
+        // one attachment per message, so a pending file gives way to the picture
+        chat_files__clear_pending_chat_file();
+
+        // a picture is sent separately from draft text. reserve preview space inside the input
+        document.getElementById("chat-input-container-text-input").value = "";
+        document.getElementById("chat-input-file-input-container").style.removeProperty("--pending-image-ratio");
+        document.getElementById("image-upload-preview").style.aspectRatio = "";
+        document.getElementById("image-upload-preview").style.display = "inline-block";
+        document.getElementById("image-upload-preview").style.backgroundImage = "url(" + event.target.result + ")";
+        g_base64_picture_string_to_send = event.target.result;
+
+        // the thumbnail takes the picture's own shape, because the css box alone would crop it
+        let preview_image = new Image();
+        preview_image.onload = function()
+        {
+            if (preview_image.naturalWidth > 0 && preview_image.naturalHeight > 0 && g_base64_picture_string_to_send === preview_image.src)
+            {
+                document.getElementById("image-upload-preview").style.aspectRatio = preview_image.naturalWidth + " / " + preview_image.naturalHeight;
+                document.getElementById("chat-input-file-input-container").style.setProperty("--pending-image-ratio", String(preview_image.naturalWidth / preview_image.naturalHeight));
+            }
+        };
+        preview_image.src = event.target.result;
+    };
+
+    reader.onerror = function()
+    {
+        if (chat_files_pending_reader !== reader)
+        {
+            return;
+        }
+        chat_files_pending_reader = null;
+        utils__custom_alert("could not read the image");
+    };
+
+    reader.readAsDataURL(file);
+}
+
+/**
+ * @brief validates a file and attaches it in place of any pending picture
+ *
+ * @param File file -> the file
+ *
+ * @return void
+ */
+function chat_files__attach_chat_file(file)
+{
+    if (g_server_policy.is_file_upload_allowed == false)
+    {
+        utils__custom_alert("file uploads are not allowed on this server");
+        return;
+    }
+
+    if (file.size > g_server_policy.file_upload_max_size)
+    {
+        utils__custom_alert("file is too big (" + chat_files__format_file_size(file.size) + "). this server allows up to " + chat_files__format_file_size(g_server_policy.file_upload_max_size));
+        return;
+    }
+
+    if (file.size == 0)
+    {
+        utils__custom_alert("the file is empty");
+        return;
+    }
+
+    chat_files__cancel_pending_read();
+    let reader = new FileReader();
+    const context = g_current_chat_context_id;
+    chat_files_pending_reader = reader;
+
+    reader.onload = function(event)
+    {
+        if (chat_files_pending_reader !== reader || context !== g_current_chat_context_id)
+        {
+            return;
+        }
+        chat_files_pending_reader = null;
+        g_pending_chat_file = {
+            name: chat_files__sanitize_file_name(file.name),
+            size: file.size,
+            mime: chat_files__sanitize_mime_type(file.type),
+            base64: chat__remove_data_url_prefix_from_base64_string(event.target.result)
+        };
+
+        // one attachment per message, so a pending picture gives way
+        chat_files__clear_pending_chat_picture();
+
+        // the file label overlays the text box, so the typed text is cleared out of its way
+        document.getElementById("chat-input-container-text-input").value = "";
+
+        chat_files__render_pending_chat_file_label();
+    };
+
+    reader.onerror = function()
+    {
+        if (chat_files_pending_reader !== reader)
+        {
+            return;
+        }
+        chat_files_pending_reader = null;
+        utils__custom_alert("could not read the file");
+    };
+
+    reader.readAsDataURL(file);
+}
+
+/**
+ * @brief drops the pending file and hides its label
+ *
+ * @return void
+ */
+function chat_files__clear_pending_chat_file()
+{
+    chat_files__cancel_pending_read();
+    g_pending_chat_file = null;
+    chat_files__render_pending_chat_file_label();
+}
+
+/**
+ * @brief clears the pending picture and hides its preview
+ *
+ * @return void
+ */
+function chat_files__clear_pending_chat_picture()
+{
+    chat_files__cancel_pending_read();
+    g_base64_picture_string_to_send = "";
+    document.getElementById("image-upload-preview").style.backgroundImage = "";
+    document.getElementById("image-upload-preview").style.display = "none";
+    document.getElementById("image-upload-preview").style.aspectRatio = "";
+}
+
+/**
+ * @brief renders the pending file label over the text box's corner, or nothing when no file is pending
+ *
+ * @return void
+ */
+function chat_files__render_pending_chat_file_label()
+{
+    let chip = document.getElementById("file-upload-preview");
+
+    if (chip == null)
+    {
+        return;
+    }
+
+    if (g_pending_chat_file == null)
+    {
+        chip.style.display = "none";
+        chip.innerHTML = "";
+        return;
+    }
+
+    chip.innerHTML = chat_files__generate_chat_file_icon_svg(g_pending_chat_file.name, "file-upload-preview-icon") + "<span class=\"file-upload-preview-text\">" + "<span class=\"file-upload-preview-name\">" + chat__sanitize_string(g_pending_chat_file.name) + "</span>" + "<span class=\"file-upload-preview-size\">" + chat_files__format_file_size(g_pending_chat_file.size) + "</span>" + "</span>" + "<span class=\"file-upload-preview-remove\" title=\"remove\">&#10005;</span>";
+
+    chip.querySelector(".file-upload-preview-remove").onclick = function(event)
+    {
+        event.stopPropagation();
+        chat_files__clear_pending_chat_file();
+    };
+
+    chip.style.display = "flex";
+}
+
+/**
+ * @brief attaches the selected file without converting it to a picture message
+ *
+ * @return void
+ */
+function chat_files__choose_chat_file_input_onchange()
+{
+    if (G_HAS_DOM == false)
+    {
+        return;
+    }
+
+    let files = document.getElementById("choose-file-input").files;
+
+    if (files.length > 0)
+    {
+        chat_files__attach_chat_file(files[0]);
+    }
+}
+
+/**
+ * @brief accepts chat file drops and prevents accidental browser navigation
+ *
+ * @return void
+ */
+function chat_files__setup_chat_file_drag_and_drop()
+{
+    if (G_HAS_DOM == false)
+    {
+        return;
+    }
+
+    document.addEventListener("dragover", function(event)
+    {
+        event.preventDefault();
+    });
+    document.addEventListener("drop", function(event)
+    {
+        event.preventDefault();
+    });
+
+    let zone_ids = ["chat-input-file-input-container", "chat-context-container"];
+
+    for (let i = 0; i < zone_ids.length; i++)
+    {
+        let zone = document.getElementById(zone_ids[i]);
+
+        if (zone == null)
+        {
+            continue;
+        }
+
+        // count nested drag events so child elements share one drop highlight
+        let depth = 0;
+
+        zone.addEventListener("dragenter", function(event)
+        {
+            event.preventDefault();
+            depth++;
+            zone.classList.add("chat-drop-active");
+        });
+
+        zone.addEventListener("dragleave", function()
+        {
+            depth--;
+
+            if (depth <= 0)
+            {
+                depth = 0;
+                zone.classList.remove("chat-drop-active");
+            }
+        });
+
+        zone.addEventListener("dragover", function(event)
+        {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+        });
+
+        zone.addEventListener("drop", function(event)
+        {
+            event.preventDefault();
+            depth = 0;
+            zone.classList.remove("chat-drop-active");
+
+            let files = (event.dataTransfer != null) ? event.dataTransfer.files : null;
+
+            if (files == null || files.length == 0)
+            {
+                return;
+            }
+
+            if (files.length > 1)
+            {
+                utils__custom_alert("one file at a time - taking the first one");
+            }
+
+            chat_files__attach_chat_file_or_picture(files[0]);
+        });
+    }
+}
+
+/**
+ * @brief updates file card cursor coordinates for the theme highlight
+ *
+ * @return void
+ */
+function chat_files__setup_chat_file_card_glow()
+{
+    if (G_HAS_DOM == false)
+    {
+        return;
+    }
+
+    let chat = document.getElementById("chat-context-container");
+
+    if (chat == null)
+    {
+        return;
+    }
+
+    chat.addEventListener("mousemove", function(event)
+    {
+        let card = (event.target != null && typeof event.target.closest === "function") ? event.target.closest(".chat-file-card") : null;
+
+        if (card == null)
+        {
+            return;
+        }
+
+        let box = card.getBoundingClientRect();
+        card.style.setProperty("--mx", (event.clientX - box.left) + "px");
+        card.style.setProperty("--my", (event.clientY - box.top) + "px");
+    });
+}
+
+/**
+ * @brief updates attachment controls from the server upload policy
+ *
+ * @return void
+ */
+function chat_files__apply_file_upload_policy_to_ui()
+{
+    if (typeof document === "undefined")
+    {
+        return;
+    }
+
+    let button = document.getElementById("custom-file-upload-button-file");
+
+    if (button == null)
+    {
+        return;
+    }
+
+    if (g_server_policy.is_file_upload_allowed == true)
+    {
+        button.classList.remove("chat-file-uploads-off");
+        button.title = "attach a file (up to " + chat_files__format_file_size(g_server_policy.file_upload_max_size) + ")";
+    }
+    else
+    {
+        button.classList.add("chat-file-uploads-off");
+        button.title = "file uploads are not allowed on this server";
+    }
+}
+
+/**
+ * @brief the same treatment for the picture button: it stays visible when pictures are off, only dimmed
+ *
+ * @return void
+ */
+function chat_files__apply_chat_picture_policy_to_ui()
+{
+    if (typeof document === "undefined")
+    {
+        return;
+    }
+
+    let button = document.getElementById("custom-file-upload-button-image");
+
+    if (button == null)
+    {
+        return;
+    }
+
+    if (g_server_policy.is_chat_picture_allowed == true)
+    {
+        button.classList.remove("chat-file-uploads-off");
+        button.title = "attach a picture (up to " + chat_files__format_file_size(g_server_policy.chat_picture_max_size) + ")";
+    }
+    else
+    {
+        button.classList.add("chat-file-uploads-off");
+        button.title = "inline pictures are disabled on this server";
+    }
+}
+
+// upload settings
+
+/**
+ * @brief shows a memory and transfer duration warning above FILE_UPLOAD_WARNING_MB
+ *
+ * @return void
+ */
+function chat_files__refresh_file_upload_size_warning()
+{
+    let input = document.getElementById("server-settings-general-file-upload-max-size-input");
+    let warning = document.getElementById("server-settings-general-file-upload-size-warning");
+
+    if (input == null || warning == null)
+    {
+        return;
+    }
+
+    let megabytes = parseInt(input.value);
+
+    warning.style.display = (megabytes > FILE_UPLOAD_WARNING_MB) ? "block" : "none";
+}
+
+/**
+ * @brief toggles the picture size control with the picture upload setting
+ *
+ * @return void
+ */
+function chat_files__refresh_picture_size_visibility()
+{
+    let checkbox = document.getElementById("server-settings-general-allow-pictures-checkbox");
+    let size_row = document.getElementById("server-settings-picture-max-size-row");
+
+    if (checkbox == null || size_row == null)
+    {
+        return;
+    }
+
+    size_row.style.display = (checkbox.checked == true) ? "" : "none";
+}
+
+/**
+ * @brief shows the upload size controls when uploads are enabled
+ *
+ * @return void
+ */
+function chat_files__refresh_file_upload_size_visibility()
+{
+    let checkbox = document.getElementById("server-settings-general-allow-file-uploads-checkbox");
+    let size_row = document.getElementById("server-settings-file-upload-size-row");
+    let warning = document.getElementById("server-settings-general-file-upload-size-warning");
+
+    if (checkbox == null || size_row == null || warning == null)
+    {
+        return;
+    }
+
+    if (checkbox.checked == true)
+    {
+        size_row.style.display = "";
+        chat_files__refresh_file_upload_size_warning();
+    }
+    else
+    {
+        size_row.style.display = "none";
+        warning.style.display = "none";
+    }
+}
+
+var chat_files_receive_timer = null;
+
+/**
+ * @brief releases an unfinished transfer and ends its file or picture progress
+ *
+ * @param number file_id -> incoming transfer ID
+ *
+ * @return void
+ */
+function chat_files__discard_receiving(file_id)
+{
+    received_files = received_files.filter(file => file.file_id !== file_id);
+    delete g_chat_file_transfers[file_id];
+    const card = chat_files__get_chat_file_card_by_key(file_id);
+    if (card)
+    {
+        chat_files__mark_chat_file_card_failed(card, "transfer ended before the file arrived");
+    }
+    chat_files__finish_chat_picture_progress(file_id);
+}
+
+/**
+ * @brief discards transfers after 30 seconds without data or five minutes overall
+ *
+ * @return void
+ */
+function chat_files__expire_receiving()
+{
+    const now = Date.now();
+    for (const file of received_files.slice())
+    {
+        if (now - file.timestamp_last_received >= 30000 || now - file.timestamp_started >= 300000)
+        {
+            chat_files__discard_receiving(file.file_id);
+        }
+    }
+    if (received_files.length === 0)
+    {
+        clearInterval(chat_files_receive_timer);
+        chat_files_receive_timer = null;
+    }
+}
+
+/**
+ * @brief clears incoming transfer buffers and stops their expiry timer
+ *
+ * @return void
+ */
+function chat_files__reset_receiving()
+{
+    received_files = [];
+    g_chat_file_transfers = {};
+    clearInterval(chat_files_receive_timer);
+    chat_files_receive_timer = null;
+}

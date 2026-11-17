@@ -1,0 +1,257 @@
+{
+    "verified": "2026-11-16",
+    "networks": [
+        {
+            "id": "rizon",
+            "name": "Rizon",
+            "host": "irc.rizon.net",
+            "port": 6697,
+            "tls": true,
+            "description": "General chat and community channels",
+            "source": "https://www.rizon.net/"
+        },
+        {
+            "id": "libera",
+            "name": "Libera.Chat",
+            "host": "irc.libera.chat",
+            "port": 6697,
+            "tls": true,
+            "description": "Free software and open source communities",
+            "source": "https://libera.chat/guides/connect"
+        },
+        {
+            "id": "oftc",
+            "name": "OFTC",
+            "host": "irc.oftc.net",
+            "port": 6697,
+            "tls": true,
+            "description": "Open and Free Technology Community",
+            "source": "https://www.oftc.net/"
+        },
+        {
+            "id": "dalnet",
+            "name": "DALnet",
+            "host": "irc.dal.net",
+            "port": 6697,
+            "tls": true,
+            "description": "General chat communities",
+            "source": "https://docs.dal.net/docs/newbie.html"
+        },
+        {
+            "id": "snoonet",
+            "name": "Snoonet",
+            "host": "irc.snoonet.org",
+            "port": 6697,
+            "tls": true,
+            "description": "Community chat network",
+            "source": "https://snoonet.org/irc-servers/"
+        },
+        {
+            "id": "hackint",
+            "name": "hackint",
+            "host": "irc.hackint.org",
+            "port": 6697,
+            "tls": true,
+            "description": "Hacker and technology communities",
+            "source": "https://www.hackint.org/connect"
+        },
+        {
+            "id": "tilde",
+            "name": "tilde.chat",
+            "host": "irc.tilde.chat",
+            "port": 6697,
+            "tls": true,
+            "description": "The tildeverse community network",
+            "source": "https://tilde.chat/"
+        },
+        {
+            "id": "espernet",
+            "name": "EsperNet",
+            "host": "irc.esper.net",
+            "port": 6697,
+            "tls": true,
+            "description": "Community and project channels",
+            "source": "https://www.esper.net/servers.php"
+        },
+        {
+            "id": "swiftirc",
+            "name": "SwiftIRC",
+            "host": "irc.swiftirc.net",
+            "port": 6697,
+            "tls": true,
+            "description": "Gaming and general chat communities",
+            "source": "https://www.swiftirc.net/info/"
+        },
+        {
+            "id": "geekshed",
+            "name": "GeekShed",
+            "host": "irc.geekshed.net",
+            "port": 6697,
+            "tls": true,
+            "description": "General chat and community channels",
+            "source": "https://www.geekshed.net/"
+        },
+        {
+            "id": "synirc",
+            "name": "synIRC",
+            "host": "irc.synirc.net",
+            "port": 6697,
+            "tls": true,
+            "description": "General chat network",
+            "source": "https://www.synirc.net/chat"
+        },
+        {
+            "id": "chatlounge",
+            "name": "ChatLounge",
+            "host": "irc.chatlounge.net",
+            "port": 6697,
+            "tls": true,
+            "description": "Community chat network",
+            "source": "https://www.chatlounge.net/servers.html"
+        },
+        {
+            "id": "chatnet",
+            "name": "ChatNet",
+            "host": "irc.chatnet.gg",
+            "port": 6697,
+            "tls": true,
+            "description": "General chat communities",
+            "source": "https://www.chatnet.gg/servers.html"
+        },
+        {
+            "id": "afternet",
+            "name": "AfterNET",
+            "host": "irc.afternet.org",
+            "port": 6697,
+            "tls": true,
+            "description": "General chat and gaming communities",
+            "source": "https://afternet.org/help/connecting/ssl"
+        },
+        {
+            "id": "freenode",
+            "name": "freenode",
+            "host": "irc.freenode.net",
+            "port": 6697,
+            "tls": true,
+            "description": "General and technology communities",
+            "source": "https://freenode.net/"
+        },
+        {
+            "id": "ergo",
+            "name": "Ergo",
+            "host": "irc.ergo.chat",
+            "port": 6697,
+            "tls": true,
+            "description": "Ergo IRC server project and testing",
+            "source": "https://ergo.chat/"
+        },
+        {
+            "id": "pirc",
+            "name": "PIRC.pl",
+            "host": "irc.pirc.pl",
+            "port": 6697,
+            "tls": true,
+            "description": "Polish general chat",
+            "source": "https://pirc.pl/"
+        },
+        {
+            "id": "darkscience",
+            "name": "Darkscience",
+            "host": "irc.darkscience.net",
+            "port": 6697,
+            "tls": true,
+            "description": "Technology and security discussion",
+            "source": "https://darkscience.net/"
+        },
+        {
+            "id": "scoutlink",
+            "name": "ScoutLink",
+            "host": "irc.scoutlink.net",
+            "port": 6697,
+            "tls": true,
+            "description": "Scouting and guiding communities",
+            "source": "https://www.scoutlink.net/"
+        },
+        {
+            "id": "2600net",
+            "name": "2600net",
+            "host": "irc.2600.net",
+            "port": 6697,
+            "tls": true,
+            "description": "Hacker culture and technology",
+            "source": "https://www.2600.net/"
+        },
+        {
+            "id": "sorcery",
+            "name": "SorceryNet",
+            "host": "irc.sorcery.net",
+            "port": 6697,
+            "tls": true,
+            "description": "General chat communities",
+            "source": "https://www.sorcery.net/"
+        },
+        {
+            "id": "ircnow",
+            "name": "IRCNow",
+            "host": "irc.ircnow.org",
+            "port": 6697,
+            "tls": true,
+            "description": "Hosting and self-hosting communities",
+            "source": "https://wiki.ircnow.org/"
+        },
+        {
+            "id": "unrealircd",
+            "name": "UnrealIRCd",
+            "host": "irc.unrealircd.org",
+            "port": 6697,
+            "tls": true,
+            "description": "UnrealIRCd support",
+            "source": "https://www.unrealircd.org/docs/SSL/TLS"
+        },
+        {
+            "id": "furnet",
+            "name": "FurNet",
+            "host": "irc.furnet.org",
+            "port": 6697,
+            "tls": true,
+            "description": "Furry fandom communities",
+            "source": "https://www.furnet.org/"
+        },
+        {
+            "id": "efnet",
+            "name": "EFnet",
+            "host": "irc.efnet.org",
+            "port": 6667,
+            "tls": false,
+            "description": "One of the original networks. Unencrypted: its TLS servers use self-signed certificates",
+            "source": "https://efnet.org/"
+        },
+        {
+            "id": "undernet",
+            "name": "Undernet",
+            "host": "irc.undernet.org",
+            "port": 6667,
+            "tls": false,
+            "description": "Large general network. Unencrypted connection",
+            "source": "https://lab.undernet.org/"
+        },
+        {
+            "id": "ircnet",
+            "name": "IRCnet",
+            "host": "open.ircnet.net",
+            "port": 6667,
+            "tls": false,
+            "description": "Large European network. Unencrypted connection",
+            "source": "https://www.ircnet.com/"
+        },
+        {
+            "id": "quakenet",
+            "name": "QuakeNet",
+            "host": "irc.quakenet.org",
+            "port": 6667,
+            "tls": false,
+            "description": "Gaming communities. Unencrypted: QuakeNet has no TLS",
+            "source": "https://www.quakenet.org/"
+        }
+    ]
+}

@@ -1,0 +1,33 @@
+# dependencies and downloaded tools
+node_modules/
+/.tools/
+
+# build output
+/client.html
+/dist/
+client-source-code/client.html
+client-source-code/**/main/wasm/*.wasm
+client-source-code/**/.build-tools/
+client-source-code/**/build/
+client-source-code/**/.gradle/
+client-source-code/**/.cxx/
+__pycache__/
+
+# test output
+/test-results/
+/playwright-report/
+
+# local bridge data
+bridge.token
+networks.cache.json
+*.log
+*.key
+*.pem
+
+# editors and operating systems
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

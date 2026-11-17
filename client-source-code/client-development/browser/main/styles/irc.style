@@ -1,0 +1,1561 @@
+/* the copied themes control the layout */
+body.irc-client
+{
+    --irc-joined-default: #e3bc63;
+    --irc-client-default: #b9c7dc;
+    --irc-self-default: #f2b481;
+}
+
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"])
+{
+    --irc-joined-default: #886017;
+    --irc-client-default: #295569;
+    --irc-self-default: #366f4c;
+}
+
+body.irc-client.irc-color-joined #channel-list-container .irc-joined-channel > .single-channel-name-p
+{
+    color: var(--irc-joined-color, var(--irc-joined-default)) !important;
+    font-weight: bold;
+}
+
+body.irc-client.irc-color-client .connected-client:not(.connected-local-client) .client-name-text,
+body.irc-client.irc-color-client .single-chat-message:not(.irc-own-message) .single-chat-message-sender-username
+{
+    color: var(--irc-client-color, var(--irc-client-default)) !important;
+}
+
+body.irc-client.irc-color-self .connected-local-client .client-name-text,
+body.irc-client.irc-color-self .irc-own-message .single-chat-message-sender-username
+{
+    color: var(--irc-self-color, var(--irc-self-default)) !important;
+}
+
+body.irc-client .irc-color-controls
+{
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+body.irc-client .local-settings-row:has(> .irc-color-controls)
+{
+    flex-wrap: wrap;
+}
+
+body.irc-client .irc-color-controls input[type="color"]
+{
+    flex: 0 0 48px;
+    width: 48px;
+    height: 32px;
+    padding: 2px;
+}
+
+body.irc-client .irc-color-controls input:disabled
+{
+    opacity: 0.45;
+}
+
+body.irc-client .irc-color-controls button
+{
+    flex: 0 0 auto;
+    width: auto;
+}
+body.irc-disconnected #communication-system-container
+{
+    display: none !important;
+}
+
+body.irc-client:not(.irc-mobile) #body-container > #communication-system-head-menu
+{
+    position: relative;
+    inset: auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    width: auto;
+    min-width: 0;
+    height: auto;
+    box-sizing: border-box;
+    z-index: 30;
+}
+
+body.irc-client #communication-system-head-menu #sound-effects-button
+{
+    background: var(--set-text, #e0e0e0) !important;
+    mask: var(--irc-sound-icon) center / 21px 19px no-repeat;
+}
+
+body.irc-client #communication-system-head-menu #hide-show-flags-button
+{
+    background: var(--set-text, #e0e0e0) !important;
+    mask: var(--irc-flag-icon) center / 18px 18px no-repeat;
+}
+
+body.irc-client #chat-window-container
+{
+    min-width: 0;
+    max-width: 100%;
+}
+
+body.irc-client #chat-context-selectors-container
+{
+    display: none !important;
+    box-sizing: border-box;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    white-space: nowrap;
+    scrollbar-width: thin;
+}
+
+body.irc-client #chat-context-select-container
+{
+    display: flex !important;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    width: 100%;
+    padding: 6px 8px;
+}
+
+body.irc-client #chat-context-select
+{
+    display: none !important;
+}
+
+body.irc-client .irc-conversation-picker,
+body.irc-client .irc-conversation-option
+{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    color: var(--set-text, #e0e0e0);
+    background: var(--set-input-bg, var(--set-panel, #36393f));
+    border: 1px solid var(--set-line, #555);
+    border-radius: var(--set-radius, 4px);
+}
+
+body.irc-client .irc-conversation-picker
+{
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: min(320px, calc(100% - 34px));
+    min-height: 30px;
+    gap: 12px;
+    padding: 5px 10px;
+    font-weight: bold;
+}
+
+body.irc-client .irc-conversation-arrow
+{
+    flex: 0 0 6px;
+    width: 6px;
+    height: 6px;
+    margin: -3px 2px 0 4px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(45deg);
+    opacity: 0.8;
+}
+
+body.irc-client #chat-context-select-close
+{
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    margin: 0;
+    font-size: 18px;
+    line-height: 28px;
+    color: var(--set-text, #e0e0e0);
+    border-radius: var(--set-radius, 4px);
+}
+
+body.irc-client #chat-context-select-close:hover
+{
+    background: var(--set-input-bg, #ffffff12);
+}
+
+body.irc-client .irc-conversation-name
+{
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.irc-client .irc-unread-badge
+{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--set-button-bg, var(--set-accent, #627dad));
+    color: var(--set-button-text, var(--set-accent-text, white));
+    font-size: 11px;
+    font-weight: bold;
+}
+
+body.irc-client .irc-conversation-popup
+{
+    position: fixed;
+    z-index: 9999;
+    box-sizing: border-box;
+    max-height: min(var(--irc-picker-height, 420px), calc(100dvh - 16px));
+    padding: 8px;
+    background: var(--set-panel, #36393f);
+    color: var(--set-text, #e0e0e0);
+    border: 1px solid var(--set-line, #555);
+    border-radius: var(--set-radius, 4px);
+    box-shadow: 0 8px 24px #0005;
+    overflow: auto;
+}
+
+body.irc-client .irc-conversation-popup > input
+{
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 6px;
+}
+
+body.irc-client .irc-conversation-option
+{
+    width: 100%;
+    border-color: transparent;
+    background: transparent;
+}
+
+body.irc-client .irc-conversation-option:is(:hover, :focus, [aria-selected="true"])
+{
+    background: var(--set-button-bg, #4e5670);
+    color: var(--set-button-text, white);
+}
+
+body.irc-client #textarea-log .log-line
+{
+    border-left: 3px solid transparent;
+    padding-left: 6px;
+}
+
+body.irc-client #textarea-log .irc-log-join
+{
+    color: #89b997;
+}
+body.irc-client #textarea-log .irc-log-leave
+{
+    color: #a6a6a6;
+}
+body.irc-client #textarea-log .irc-log-nickname
+{
+    color: #acb8dd;
+}
+body.irc-client #textarea-log .irc-log-topic
+{
+    color: #9dcac8;
+}
+body.irc-client #textarea-log .irc-log-notice
+{
+    color: #bec9dd;
+}
+body.irc-client #textarea-log .irc-log-connection
+{
+    color: #8ec5ef;
+    border-left-color: currentColor;
+}
+body.irc-client #textarea-log .irc-log-operator
+{
+    color: #d4b0ef;
+    border-left-color: currentColor;
+}
+body.irc-client #textarea-log .irc-log-moderation
+{
+    color: #ebbe86;
+    border-left-color: currentColor;
+}
+body.irc-client #textarea-log .irc-log-warning
+{
+    color: #f0d27f;
+    border-left-color: currentColor;
+}
+body.irc-client #textarea-log .irc-log-error
+{
+    color: #ff9a94;
+    border-left-color: currentColor;
+    font-weight: bold;
+}
+
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-join
+{
+    color: #326641;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-leave
+{
+    color: #5b5b5b;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-nickname
+{
+    color: #525c88;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-topic
+{
+    color: #326867;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-notice
+{
+    color: #495a76;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-connection
+{
+    color: #245e8b;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-operator
+{
+    color: #794691;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-moderation
+{
+    color: #885b1f;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-warning
+{
+    color: #755905;
+}
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"]) #textarea-log .irc-log-error
+{
+    color: #ad2923;
+}
+
+body.irc-client #chat-context-selectors-container > .chat-context-selector
+{
+    flex-shrink: 0;
+}
+
+body.irc-mobile #groups-menu
+{
+    display: none;
+}
+
+body.show-channel-people-in-channel-list #channel-list-container .single-channel:has(> .single-channel-people) > .single-channel-name-p
+{
+    flex-grow: 0;
+}
+
+body.show-channel-people-in-channel-list #channel-list-container .single-channel > .single-channel-people
+{
+    margin-right: auto;
+}
+
+body.irc-mobile #communication-system-container
+{
+    height: calc(100dvh - var(--irc-toolbar-height)) !important;
+    min-height: 0;
+    overflow: hidden;
+}
+
+body.irc-mobile[data-irc-theme="default-mobile"] #communication-system-container
+{
+    grid-template-rows: minmax(0, 1fr) auto !important;
+}
+
+body.irc-mobile #space-devider1
+{
+    min-height: 0;
+    overflow: hidden;
+}
+
+body.irc-mobile #channel-list-container
+{
+    height: 100% !important;
+    max-height: 100% !important;
+    margin: 0;
+    overflow-y: auto !important;
+}
+
+body.irc-mobile #space-devider1.irc-filter-open > #channel-list-container
+{
+    height: auto !important;
+}
+
+body.irc-mobile #show-hide-log-button[aria-expanded="true"]
+{
+    display: block !important;
+}
+
+body.irc-mobile #container-2
+{
+    box-sizing: border-box;
+    max-width: calc(100vw - 16px);
+}
+
+body.irc-client #local-settings-container [hidden]
+{
+    display: none !important;
+}
+
+@media (max-width: 380px)
+{
+    body[data-irc-theme="mobile-2"] #communication-system-head-menu
+    {
+        padding-inline: 4px;
+    }
+
+    body[data-irc-theme="mobile-2"] #communication-system-head-menu > :is(input[type="button"], button, label)
+    {
+        min-width: 20px;
+        background-size: 20px 20px;
+    }
+
+    body[data-irc-theme="mobile-2"] #communication-system-head-menu #head-menu-left-group
+    {
+        gap: 0;
+    }
+
+    body[data-irc-theme="mobile-2"] #communication-system-head-menu #head-menu-left-group :is(#connections-menu-button, #bookmarks-menu-button, #groups-menu-button)
+    {
+        width: 28px;
+        min-width: 0;
+        padding: 0;
+        background-size: 20px 20px;
+    }
+}
+
+.irc-identity-choice
+{
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.irc-identity-choice select
+{
+    flex: 1;
+    min-width: 0;
+}
+
+.irc-identity-choice button
+{
+    width: auto;
+    height: auto;
+    padding: 4px 10px;
+}
+
+.irc-role
+{
+    display: inline-flex;
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    margin-left: 2px;
+    background: none;
+}
+
+body.irc-client #channel-list-container .connected-client .client-groups:has(.irc-role)
+{
+    flex: 0 0 auto;
+    max-width: 54px;
+}
+
+.irc-activity
+{
+    display: inline-block;
+    flex: 0 0 10px;
+    width: 10px;
+    height: 10px;
+    box-sizing: border-box;
+    border: 1px solid #7b868c;
+    border-radius: 50%;
+    margin: 0 4px 0 6px;
+    order: 30;
+    align-self: center;
+}
+
+body.irc-client .channel-list-context-menu
+{
+    max-height: calc(100dvh - 16px);
+    overflow-y: auto;
+}
+
+body.irc-client .channel-list-context-menu.irc-sort-menu
+{
+    min-width: 220px;
+    max-width: calc(100vw - 16px);
+}
+
+body.irc-client .irc-menu-mark
+{
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+body.irc-client .context-menu-item:has(.irc-menu-mark)
+{
+    position: relative;
+    padding-right: 28px;
+}
+
+:is(#channel-list-container, #idle-clients-container) .connected-client .single-group.irc-role
+{
+    display: inline-flex;
+    padding: 0;
+}
+
+/* role icons from Tabler Icons (MIT), one color per role */
+.irc-role svg
+{
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+    stroke: none;
+}
+
+.irc-role-owner { color: #e3b341; }
+.irc-role-admin { color: #f0883e; }
+.irc-role-operator { color: #3fb950; }
+.irc-role-halfop { color: #58a6ff; }
+.irc-role-voice { color: #39c5cf; }
+.irc-role-network { color: #bc8cff; }
+
+.irc-avatar
+{
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+    pointer-events: none;
+}
+
+#current-client-avatar img
+{
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+}
+
+.chat-link-previews :is(audio, video)
+{
+    max-width: 100%;
+    max-height: 280px;
+}
+
+#idle-clients-container,
+#current-client-description
+{
+    display: none;
+}
+
+.single-chat-message-content-p
+{
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: calc(var(--irc-font-size, 14px) * var(--chat-scale, 1));
+}
+
+#current-channel-description p
+{
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#verification-system
+{
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    overflow: auto;
+    pointer-events: none;
+}
+
+body.irc-client #verification-system #container-2
+{
+    position: fixed;
+    margin: 0;
+    transform: none;
+    box-sizing: border-box;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    overflow: auto;
+    pointer-events: auto;
+}
+
+#verification-system #menu-bar-container
+{
+    display: block;
+    cursor: move;
+    touch-action: none;
+    user-select: none;
+}
+
+body.irc-client #local-settings-container
+{
+    z-index: 10001;
+}
+
+#connect-keys-section label
+{
+    display: block;
+    margin: 8px 0;
+}
+
+#connect-keys-section input
+{
+    margin-left: 12px;
+}
+
+#another-buttons-loading-container-p
+{
+    max-width: 440px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.irc-dialog
+{
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    padding: 16px;
+    box-sizing: border-box;
+    height: fit-content;
+    background: var(--set-panel, #262626);
+    color: var(--set-text, #e0e0e0);
+    border: 1px solid var(--set-line, #4a4a4a);
+    border-radius: var(--set-radius, 5px);
+    font: 13px var(--set-font, sans-serif);
+    width: 480px;
+    max-width: calc(100vw - 32px);
+    max-height: 80vh;
+    overflow: auto;
+}
+
+.irc-dialog .button-1,
+#connect-server-section .button-1
+{
+    width: auto !important;
+    height: auto !important;
+    min-height: 29px;
+    padding: 6px 14px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.irc-dialog > .button-1,
+#connect-server-section > .button-1
+{
+    margin: 10px 8px 0 0;
+}
+
+.irc-dialog > p
+{
+    margin: 8px 0;
+}
+
+.irc-user-suggestions .button-1
+{
+    margin: 4px 6px 4px 0;
+}
+
+#irc-management
+{
+    width: 600px;
+}
+
+.irc-management-heading
+{
+    position: sticky;
+    top: -16px;
+    z-index: 1;
+    margin: -16px -16px 0;
+    padding: 16px;
+    background: var(--set-panel, #262626);
+    border-bottom: 1px solid var(--set-line, #4a4a4a);
+}
+
+.irc-management-navigation
+{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.irc-management-navigation select
+{
+    flex: 1;
+    min-width: 0;
+}
+
+.irc-management-section
+{
+    margin-top: 16px;
+}
+
+.irc-management-section h3
+{
+    margin: 20px 0 10px;
+}
+
+.irc-management-section p
+{
+    margin: 10px 0;
+    line-height: 1.5;
+}
+
+.irc-management-section select,
+#irc-management > select
+{
+    max-width: 100%;
+}
+
+.irc-management-field
+{
+    display: block;
+    margin: 12px 0 6px;
+}
+
+.irc-management-field input
+{
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin-top: 5px;
+}
+
+.irc-management-toggle
+{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.irc-management-section .button-1
+{
+    margin: 4px 6px 4px 0;
+}
+
+.irc-management-ban
+{
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    overflow-wrap: anywhere;
+}
+
+.irc-management-replies
+{
+    max-height: 140px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border: 1px solid var(--set-line, #4a4a4a);
+    padding: 8px;
+}
+
+#irc-nickname
+{
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#channel-list-container
+{
+    display: flex !important;
+    flex-direction: column;
+}
+
+#channel-list-container > *
+{
+    flex-shrink: 0;
+}
+
+.irc-tree-spacer
+{
+    pointer-events: none;
+}
+
+#space-devider1.irc-filter-open
+{
+    display: flex !important;
+    flex-direction: column;
+}
+
+#space-devider1.irc-filter-open > #channel-list-container
+{
+    flex: 1 1 0%;
+    height: auto !important;
+    min-height: 0;
+    margin-bottom: 0;
+}
+
+#irc-channel-filter
+{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px;
+    flex-shrink: 0;
+    padding: 8px;
+    box-sizing: border-box;
+    color: var(--set-text, #e0e0e0);
+    font: 12px var(--set-font, sans-serif);
+}
+
+#irc-channel-filter[hidden]
+{
+    display: none;
+}
+
+#irc-channel-filter > input
+{
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#irc-channel-filter > button
+{
+    width: 24px;
+    min-width: 24px;
+    height: auto;
+    padding: 0;
+    font-size: 18px;
+    color: inherit;
+    background: transparent;
+}
+
+#irc-channel-filter > output
+{
+    grid-column: 1 / -1;
+}
+
+.irc-dialog-heading
+{
+    position: relative;
+    min-height: 22px;
+    padding-right: 30px;
+    font-weight: bold;
+    margin-bottom: 12px;
+}
+
+.irc-dialog-heading > p
+{
+    margin: 0;
+    line-height: 22px;
+}
+
+/* matches the connection window's close button */
+.irc-dialog-heading > .close-button
+{
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    float: none;
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--set-radius, 4px);
+    color: var(--set-muted, rgba(255, 255, 255, 0.45));
+    font-size: 13px;
+    line-height: 22px;
+    text-align: center;
+    cursor: pointer;
+}
+
+.irc-dialog-heading > .close-button::before
+{
+    content: "\2715";
+}
+
+.irc-dialog-heading > .close-button:is(:hover, :focus-visible)
+{
+    background: var(--set-danger-soft, rgba(208, 80, 80, 0.16));
+    color: var(--set-danger-strong, #ff6b6b);
+    outline: none;
+}
+
+.irc-directory
+{
+    max-height: 50vh;
+    overflow: auto;
+    margin: 12px 0;
+}
+
+#communication-system-head-menu #irc-network-browser-button
+{
+    position: absolute;
+    right: 0;
+    width: 24px;
+    height: 24px;
+    background: var(--set-text, #e0e0e0) !important;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='1.6'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cellipse cx='12' cy='12' rx='4' ry='9'/%3E%3Cpath d='M3 12h18M5 6.5h14M5 17.5h14'/%3E%3C/g%3E%3C/svg%3E") center / 20px 20px no-repeat;
+}
+
+body.irc-mobile #communication-system-head-menu #irc-network-browser-button
+{
+    position: static;
+    flex: 0 0 20px;
+    width: 20px;
+    min-width: 20px;
+}
+
+#irc-network-browser
+{
+    width: min(640px, 85vw);
+}
+
+#irc-network-browser
+{
+    width: 380px;
+}
+
+.irc-network-results
+{
+    display: flex;
+    flex-direction: column;
+    max-height: 60vh;
+    overflow: auto;
+    margin: 4px 0 12px 0;
+}
+
+.irc-network-row
+{
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 6px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.irc-network-row:is(:hover, :focus-visible)
+{
+    background: var(--set-button-bg, rgba(127, 127, 127, 0.25));
+    color: var(--set-button-text, inherit);
+    outline: none;
+}
+
+.irc-network-current
+{
+    font-weight: 600;
+}
+
+.irc-network-name
+{
+    white-space: nowrap;
+}
+
+.irc-network-host
+{
+    overflow: hidden;
+    font-size: 11px;
+    opacity: 0.65;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#irc-channel-browser > input,
+.irc-dialog > label > input,
+#irc-command-window > input
+{
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 8px 0;
+}
+
+.irc-command-output
+{
+    white-space: pre-wrap;
+    overflow: auto;
+    max-height: 45vh;
+    margin: 12px 0;
+}
+
+body.irc-client #communication-system-head-menu #sound-effects-button[aria-pressed="false"]
+{
+    mask-image: var(--irc-sound-muted-icon);
+}
+
+.irc-user-details
+{
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px 16px;
+    margin: 12px 0;
+}
+
+.irc-user-details dt
+{
+    font-weight: bold;
+}
+
+.irc-user-details dd
+{
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+/* connection window: one label column, aligned fields, status beside the connect button */
+body.irc-client #verification-system #container-2
+{
+    width: 520px;
+    min-width: 0 !important;
+    padding-bottom: 14px;
+}
+
+body.irc-client #verification-system .connect-section
+{
+    max-width: none;
+    margin: 12px 0 0 0;
+    padding: 8px 12px 12px 12px;
+}
+
+body.irc-client #verification-system .irc-connect-grid
+{
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    gap: 8px 10px;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+}
+
+body.irc-client #verification-system .irc-connect-grid .connect-window-label
+{
+    text-align: right;
+    white-space: nowrap;
+}
+
+body.irc-client #verification-system .irc-connect-grid .connect-window-field
+{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+body.irc-client #verification-system .irc-connect-grid .connect-window-field > :is(input, select)
+{
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+}
+
+body.irc-client #verification-system .irc-connect-grid .connect-window-field > .button-1
+{
+    flex: 0 0 auto;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0;
+    margin: 0;
+    padding: 5px 12px;
+    white-space: nowrap;
+}
+
+body.irc-client #verification-system .irc-identity-choice
+{
+    margin: 0;
+}
+
+body.irc-client #verification-system #connect-keys-section .connect-section-text
+{
+    margin: 10px 0 0 86px;
+    font-size: 12px;
+    opacity: 0.75;
+    word-break: normal;
+}
+
+body.irc-client #verification-system #connect-advanced-toggle
+{
+    max-width: none;
+    margin: 10px 0 0 0;
+    padding: 0 2px;
+    border: 0;
+}
+
+body.irc-client #verification-system #another-buttons-container
+{
+    margin: 14px 0 0 0;
+}
+
+body.irc-client #verification-system #another-buttons-sub-container
+{
+    display: flex !important;
+    align-items: center;
+    gap: 12px;
+    max-width: none;
+    margin: 0;
+}
+
+body.irc-client #verification-system #connect-status-section
+{
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: left;
+}
+
+body.irc-client #verification-system #another-buttons-sub-loading-container
+{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+body.irc-client #verification-system #another-buttons-sub-loading-container > div:last-child
+{
+    display: block !important;
+    height: auto !important;
+    min-width: 0;
+}
+
+body.irc-client #verification-system #another-buttons-loading-container-p
+{
+    max-width: none;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.35;
+    text-align: left;
+    opacity: 0.85;
+}
+
+body.irc-client #verification-system #connect-button
+{
+    flex: 0 0 auto;
+    min-width: 96px;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 0 0 auto;
+    padding: 7px 18px;
+    font-weight: 600;
+}
+
+body.irc-mobile #verification-system .irc-connect-grid
+{
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+}
+
+body.irc-mobile #verification-system .irc-connect-grid .connect-window-label
+{
+    text-align: left;
+}
+
+body.irc-mobile #verification-system #connect-keys-section .connect-section-text
+{
+    margin-left: 0;
+}
+
+/* new private chat button beside the conversation picker */
+body.irc-client .irc-conversation-new
+{
+    flex: 0 0 auto;
+    width: 30px;
+    height: 30px;
+    margin: 0 6px;
+    padding: 0;
+    border: 1px solid var(--set-line, #555);
+    border-radius: var(--set-radius, 4px);
+    background: var(--set-button-bg, #4e5670);
+    color: var(--set-button-text, white);
+    font: bold 17px/1 sans-serif;
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+body.irc-client .irc-conversation-new:is(:hover, :focus-visible)
+{
+    filter: brightness(1.15);
+}
+
+body.irc-client .irc-conversation-message .irc-conversation-name
+{
+    font-style: italic;
+}
+
+/* channel list loading indicator in the network row */
+body.irc-client .irc-channel-loading
+{
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    margin-left: 8px;
+    padding: 0;
+    opacity: 0.8;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+body.irc-client .irc-spinner
+{
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    box-sizing: border-box;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: irc-spin 0.8s linear infinite;
+}
+
+@keyframes irc-spin
+{
+    to
+    {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce)
+{
+    body.irc-client .irc-spinner
+    {
+        animation-duration: 2.4s;
+    }
+}
+
+body.irc-client .irc-message-author
+{
+    cursor: pointer;
+}
+
+body.irc-client .irc-message-author:hover
+{
+    text-decoration: underline;
+}
+
+/* ignored users in the chat settings */
+body.irc-client .irc-ignored-users
+{
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--set-line, rgba(127, 127, 127, 0.3));
+}
+
+body.irc-client .irc-ignored-list
+{
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 180px;
+    overflow: auto;
+}
+
+body.irc-client .irc-ignored-row,
+body.irc-client .irc-ignored-add
+{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+body.irc-client .irc-ignored-nick
+{
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 600;
+}
+
+body.irc-client .irc-ignored-add input
+{
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+body.irc-client .irc-ignored-users .button-1
+{
+    width: auto !important;
+    height: auto !important;
+    padding: 4px 12px;
+    white-space: nowrap;
+}
+
+body.irc-client .irc-ignored-empty
+{
+    margin: 0;
+    opacity: 0.7;
+    font-size: 12px;
+}
+
+/* compact chat menu: the theme's context menu with smaller text and no icons */
+#contextmenus-container .irc-compact-menu .channel-list-context-menu-items
+{
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 2px 0;
+}
+
+#contextmenus-container .irc-compact-menu .context-menu-item
+{
+    width: auto !important;
+    min-width: 72px;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 3px 14px 3px 10px !important;
+    font-size: 12px !important;
+    line-height: 16px !important;
+    white-space: nowrap;
+}
+
+#contextmenus-container .irc-compact-menu .context-menu-item::before
+{
+    display: none !important;
+}
+
+#contextmenus-container .channel-list-context-menu.irc-compact-menu
+{
+    min-width: 0 !important;
+    padding: 3px !important;
+}
+
+/* attachment buttons are hidden unless the network advertises a file host */
+body.irc-client .custom-file-upload-button.irc-upload-unavailable
+{
+    display: none !important;
+}
+
+body.irc-client .irc-profile-role
+{
+    opacity: 0.7;
+    font-size: 0.9em;
+}
+
+/* conversation picker: kind icons and section headings */
+body.irc-client .irc-conversation-kind
+{
+    flex: 0 0 14px;
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.7;
+}
+
+body.irc-client .irc-conversation-option
+{
+    gap: 8px;
+}
+
+body.irc-client .irc-conversation-section
+{
+    margin: 8px 4px 2px 4px;
+    font-weight: 600;
+    font-size: 11px;
+    opacity: 0.55;
+}
+
+body.irc-client .irc-conversation-section:first-child
+{
+    margin-top: 2px;
+}
+
+
+body.irc-client .irc-settings-actions
+{
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 16px;
+}
+
+body.irc-client .irc-settings-actions .button-1
+{
+    width: auto !important;
+    height: auto !important;
+    padding: 5px 14px;
+    white-space: nowrap;
+}
+
+/* configurable message width */
+body.irc-client .chat-context .single-chat-message
+{
+    max-width: var(--irc-message-width, 100%) !important;
+    box-sizing: border-box;
+}
+
+body.irc-client .irc-settings-range
+{
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 140px 56px;
+    align-items: center;
+    gap: 10px;
+}
+
+body.irc-client .irc-settings-range input[type="range"]
+{
+    width: 100%;
+    margin: 0;
+}
+
+body.irc-client .irc-settings-range-value
+{
+    text-align: right;
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+/* links in chat: orange, short labels, underline on hover */
+body.irc-client
+{
+    --irc-link-color: #ffd27a;
+    --irc-link-shadow: 0 0 3px rgba(0, 0, 0, 0.85), 0 1px 1px rgba(0, 0, 0, 0.9);
+    --irc-preview-bg: rgba(0, 0, 0, 0.45);
+}
+
+/* dark navy, green and teal themes: a warmer orange, no outline needed */
+body.irc-client:is([data-irc-theme="termix"], [data-irc-theme="default-mobile"], [data-irc-theme="mobile-2"], [data-irc-theme="hybrid-v2"])
+{
+    --irc-link-color: #ffb454;
+    --irc-link-shadow: none;
+    --irc-preview-bg: rgba(255, 180, 84, 0.06);
+}
+
+body.irc-client[data-irc-theme="ozone"]
+{
+    --irc-link-color: #ffbe5c;
+    --irc-link-shadow: none;
+    --irc-preview-bg: rgba(255, 190, 92, 0.06);
+}
+
+/* light themes: a dark burnt orange */
+body.irc-client:is([data-irc-theme="aero"], [data-irc-theme="hybrid"])
+{
+    --irc-link-color: #a34a00;
+    --irc-link-shadow: none;
+    --irc-preview-bg: rgba(163, 74, 0, 0.05);
+}
+
+body.irc-client .chat-context a.irc-link
+{
+    color: var(--irc-link-color);
+    text-shadow: var(--irc-link-shadow);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+}
+
+body.irc-client .chat-context a.irc-link:hover
+{
+    border-bottom-color: currentColor;
+}
+
+body.irc-client .chat-context .irc-site-preview:empty
+{
+    display: none;
+}
+
+body.irc-client .chat-context .chat-link-preview
+{
+    max-width: 420px;
+    background: var(--irc-preview-bg);
+    border-color: color-mix(in srgb, var(--irc-link-color) 45%, transparent);
+    border-left-color: var(--irc-link-color);
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+}
+
+body.irc-client .chat-context .chat-link-preview-title
+{
+    color: var(--irc-link-color);
+    text-shadow: var(--irc-link-shadow);
+}
+
+body.irc-client .chat-context .chat-link-preview img
+{
+    max-height: 200px;
+    object-fit: cover;
+}
+
+.irc-network-row:disabled
+{
+    opacity: 0.7;
+    cursor: progress;
+}
+
+.irc-network-failed .irc-network-host
+{
+    color: var(--set-danger-strong, #ff6b6b);
+    opacity: 1;
+}
+
+/* member rows: fixed columns at the right edge, in the order role, activity, flag.
+   a column appears when any member of the channel needs it; then an empty role or flag keeps its place */
+body.irc-client :is(#channel-list-container, #idle-clients-container, #member-list-body) .connected-client .connected-client-p
+{
+    flex: 1 1 0 !important;
+    min-width: 24px !important;
+    overflow: hidden;
+}
+
+body.irc-client :is(#channel-list-container, #idle-clients-container, #member-list-body) .connected-client .client-name-text
+{
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.irc-client :is(#channel-list-container, #idle-clients-container, #member-list-body) .connected-client:not(.irc-role-column) .client-groups
+{
+    display: none !important;
+}
+
+body.irc-client :is(#channel-list-container, #idle-clients-container, #member-list-body) .connected-client.irc-role-column .client-groups
+{
+    display: flex !important;
+    flex: 0 0 var(--tree-icon-size, 16px) !important;
+    width: var(--tree-icon-size, 16px) !important;
+    max-width: var(--tree-icon-size, 16px) !important;
+    min-width: var(--tree-icon-size, 16px) !important;
+    margin-left: 4px !important;
+    justify-content: center !important;
+    overflow: hidden;
+}
+
+body.irc-client :is(#channel-list-container, #idle-clients-container, #member-list-body) .connected-client :is(.connected-client-country-flag, .irc-activity)
+{
+    flex-shrink: 0 !important;
+}
+
+body.irc-client :is(#channel-list-container, #idle-clients-container, #member-list-body) .connected-client .connected-client-country-flag
+{
+    order: 40 !important;
+}

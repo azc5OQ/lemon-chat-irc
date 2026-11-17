@@ -1,0 +1,50 @@
+/* Simple: the shared phone layout with lemon colours; included after theme-phone.style. */
+:root
+{
+    --mono-bg: #ffffff;
+    --mono-surface: #f5f3ec;
+    --mono-text: #1d1c18;
+    --mono-muted: #67645a;
+    --mono-line: #e7e3d6;
+    --mono-inverse: #ffffff;
+    --mono-accent: #6f5a00;
+    --phone-accent: #ffd83d;
+    --phone-accent-soft: #fff5c7;
+    --phone-accent-text: #332a00;
+    --phone-microphone-icon: var(--phone-microphone-dark);
+    --phone-send-icon: var(--phone-send-dark);
+}
+
+@media (prefers-color-scheme: dark)
+{
+    :root
+    {
+        color-scheme: dark;
+        --mono-bg: #131311;
+        --mono-surface: #201f1b;
+        --mono-text: #f4f1e8;
+        --mono-muted: #aaa698;
+        --mono-line: #36332b;
+        --mono-inverse: #131311;
+        --mono-accent: #ffe680;
+        --phone-accent-soft: #3b3310;
+        --mono-icon-filter: invert(1);
+    }
+}
+
+/* The page of this theme is made for one server, so the button with the connections is not shown. The top
+   bar of a conversation keeps room for the two buttons that are left. */
+:root #connections-menu
+{
+    display: none !important;
+}
+
+:root
+{
+    --phone-bar-buttons: 88px;
+}
+
+:root #member-conversations-profile
+{
+    width: calc(100% - 150px);
+}

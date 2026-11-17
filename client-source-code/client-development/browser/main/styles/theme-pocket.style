@@ -1,0 +1,454 @@
+/* Pocket: the shared phone layout in white leather colours with grey buttons and the Plus Jakarta Sans font; included after theme-phone-tabs.style. */
+:root
+{
+    color-scheme: light;
+    --set-font: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+    --mono-bg: #ffffff;
+    --mono-surface: #f1f3f4;
+    --mono-text: #1c2024;
+    --mono-muted: #626a72;
+    --mono-line: #dde1e5;
+    --mono-inverse: #ffffff;
+    --mono-accent: #3d444c;
+    --mono-icon-filter: none;
+    --phone-accent: #3d444c;
+    --phone-accent-soft: #e6e9ec;
+    --phone-accent-text: #ffffff;
+    /* the colours of the bar of the four screens and of the talk button, see theme-phone-tabs.style */
+    --tabs-icon: #b9c0c7;
+    --tabs-icon-shown: #ffffff;
+    --tabs-title: #ffffff;
+    --tabs-row: #f7f8f9;
+    --tabs-label: #ffffff;
+    --tabs-label-line: #3d444c99;
+    --tabs-bar-background: transparent;
+    --tabs-bar-line: 0;
+    --tabs-talk-background: var(--pocket-microphone) center / 22px no-repeat padding-box, radial-gradient(circle at 34% 24%, #ffffff, #eceff1 60%, #c9cfd5) padding-box, var(--pocket-chrome-ring) border-box;
+    --tabs-talk-shadow: 0 0 0 1px #7a8188, 0 0 0 4px #ffffff, 0 0 0 5px var(--pocket-hairline), 0 8px 14px -5px #14171a99;
+    --tabs-talk-background-on: var(--phone-microphone-light) center / 22px no-repeat padding-box, radial-gradient(circle at 34% 24%, #aeb5bc, #3d444c 58%, #1e2226) padding-box, var(--pocket-chrome-ring) border-box;
+    --tabs-talk-shadow-on: 0 0 0 1px #7a8188, 0 0 0 4px #ffffff, 0 0 0 6px #8d949b, 0 0 0 12px #8d949b40, 0 8px 14px -5px #14171ab3;
+    --tabs-talk-words-background: var(--pocket-lacquer);
+    --tabs-talk-words-border: 1.5px dotted #ffffffb3;
+    --tabs-talk-words-shadow: 0 1px 2px #14171a33, 0 8px 14px -8px #14171acc;
+    --tabs-join-background: var(--pocket-lacquer) padding-box, var(--pocket-chrome-ring) border-box;
+    --tabs-join-border: 2px solid transparent;
+    --tabs-join-shadow: inset 0 1px 0 #ffffff59, 0 0 0 1px #7a8188, 0 6px 12px -6px #14171acc;
+}
+
+/* Frame the white quilted panel with dark bars, chrome edges and stitched seams. */
+:root
+{
+    --pocket-thread: #9aa3ac;
+    --pocket-hairline: #cdd2d7;
+    --pocket-chrome: linear-gradient(90deg, #8d949b, #ffffff 16%, #b3b9bf 36%, #f7f8f9 56%, #7f868d 78%, #ffffff);
+    --pocket-chrome-ring: conic-gradient(from 200deg, #7f868d, #ffffff, #b3b9bf, #f7f8f9, #7f868d, #ffffff, #a0a7ae, #f7f8f9, #7f868d);
+    --pocket-lacquer: linear-gradient(165deg, #5a626b, #343a41 55%, #1e2226);
+    --pocket-leather: linear-gradient(180deg, #ffffff, #eceff1);
+    --pocket-raised: inset 0 1px 0 #ffffff, 0 1px 1px #14171a26, 0 8px 16px -8px #14171a73;
+    --pocket-pressed-in: inset 0 2px 5px #14171a38, 0 1px 0 #ffffffd9;
+    --pocket-microphone: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%233d444c%27%20stroke-width%3D%271.7%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%20%3Crect%20x%3D%278%27%20y%3D%272%27%20width%3D%278%27%20height%3D%2713%27%20rx%3D%274%27%2F%3E%3Cpath%20d%3D%27M5%2010v2a7%207%200%200%200%2014%200v-2M12%2019v3M8%2022h8%27%2F%3E%20%3C%2Fsvg%3E");
+    --pocket-quilt: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2748%27%20height%3D%2772%27%20viewBox%3D%270%200%2048%2072%27%3E%20%3Cdefs%3E%3CradialGradient%20id%3D%27pad%27%20cx%3D%27.5%27%20cy%3D%27.4%27%20r%3D%27.62%27%3E%3Cstop%20offset%3D%270%27%20stop-color%3D%27%23ffffff%27%2F%3E%3Cstop%20offset%3D%27.62%27%20stop-color%3D%27%23f6f7f8%27%2F%3E%3Cstop%20offset%3D%271%27%20stop-color%3D%27%23e4e7ea%27%2F%3E%3C%2FradialGradient%3E%3C%2Fdefs%3E%20%3Crect%20width%3D%2748%27%20height%3D%2772%27%20fill%3D%27%23e4e7ea%27%2F%3E%20%3Cpath%20d%3D%27M24%200L48%2036L24%2072L0%2036Z%27%20fill%3D%27url%28%23pad%29%27%2F%3E%20%3Cpath%20d%3D%27M0%20-36L24%200L0%2036L-24%200Z%27%20fill%3D%27url%28%23pad%29%27%2F%3E%20%3Cpath%20d%3D%27M48%20-36L72%200L48%2036L24%200Z%27%20fill%3D%27url%28%23pad%29%27%2F%3E%20%3Cpath%20d%3D%27M0%2036L24%2072L0%20108L-24%2072Z%27%20fill%3D%27url%28%23pad%29%27%2F%3E%20%3Cpath%20d%3D%27M48%2036L72%2072L48%20108L24%2072Z%27%20fill%3D%27url%28%23pad%29%27%2F%3E%20%3Cpath%20d%3D%27M24%201L48%2037L24%2073L0%2037Z%27%20fill%3D%27none%27%20stroke%3D%27%23ffffff%27%20stroke-opacity%3D%27.85%27%20stroke-width%3D%271%27%2F%3E%20%3Cpath%20d%3D%27M24%200L48%2036L24%2072L0%2036Z%27%20fill%3D%27none%27%20stroke%3D%27%2320262c%27%20stroke-opacity%3D%27.22%27%20stroke-width%3D%271%27%2F%3E%20%3C%2Fsvg%3E");
+}
+
+/* The frame: dark grey, with a light reflection across the top bar. It is drawn under the page;
+   the top bar and the bar of the four screens are the parts of it that the panel leaves free. */
+:root:has(body[data-conversation-tab]):not(:has(body.is-connected-ui-hidden)) #body-container::before
+{
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(120% 140% at 0 0, #ffffff40, #ffffff14 32%, #ffffff00 58%) top / 100% var(--mono-top) no-repeat,
+                linear-gradient(180deg, #ffffff26, #ffffff00) bottom / 100% var(--mono-bottom) no-repeat,
+                linear-gradient(180deg, #15181b, #2c3136 var(--mono-top), #24282c calc(100% - var(--mono-bottom)), #0f1113);
+    pointer-events: none;
+}
+
+:root #communication-system-head-menu,
+:root #communication-system-container > #communication-system-head-menu
+{
+    border-bottom: 0;
+    background: transparent;
+}
+
+/* The panel: white quilted leather with rounded corners, a chrome line on its upper and lower edge and a stitched seam inside the edge. */
+:root:has(body[data-conversation-tab]) #communication-system-container
+{
+    border: solid transparent;
+    border-width: 2px 0;
+    border-radius: 26px;
+    background: var(--pocket-quilt) 0 0 / 40px 60px padding-box, var(--pocket-chrome) border-box;
+    box-shadow: 0 0 0 1px #0f1113, 0 0 16px #00000080;
+    outline: 1.5px dashed var(--pocket-thread);
+    outline-offset: -6px;
+}
+
+:root :is(#space-devider2, #chat-window-container, #chat-context-container, #space-devider-42, #space-devider4, #space-devider1)
+{
+    background: transparent;
+}
+
+/* a window wider than the layout: the frame fills the window and the panel has the chrome line on all four sides */
+@media (min-width: 800px)
+{
+    :root:has(body[data-conversation-tab]) #communication-system-container
+    {
+        border-width: 2px;
+    }
+
+    :root:has(body[data-conversation-tab]) #body-container::after
+    {
+        content: none;
+    }
+}
+
+/* the words and the back arrow on the dark top bar are white */
+/* the title of a screen is white through --tabs-title; the name of a conversation is made white here, and both get a shadow */
+:root:has(body[data-conversation-tab]) #communication-system-head-menu::before,
+:root .chat-context-selector[style*="background-color"],
+:root .chat-context-selector[style*="background-color"] :is(p, .p-container)
+{
+    color: #ffffff;
+    text-shadow: 0 1px 2px #00000080;
+}
+
+/* the line under the name of a conversation is light on the dark top bar; the letters of the round picture have no shadow */
+:root:has(body[data-conversation-tab]) .chat-context-selector[style*="background-color"]::after
+{
+    color: #c9cfd5;
+}
+
+:root:has(body[data-conversation-tab]) .chat-context-selector[style*="background-color"]::before
+{
+    text-shadow: none;
+}
+
+:root #communication-system-head-menu > #hide-chat-button
+{
+    background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2024%2024%27%20fill%3D%27none%27%20stroke%3D%27%23ffffff%27%20stroke-width%3D%272%27%20stroke-linecap%3D%27round%27%20stroke-linejoin%3D%27round%27%3E%20%3Cpath%20d%3D%27M15%205l-7%207%207%207%27%2F%3E%20%3C%2Fsvg%3E") !important;
+}
+
+/* the lists and the chat start under the seam of the panel and keep clear of it on both sides */
+:root:has(body[data-conversation-tab]) #member-list-container,
+:root:has(body[data-conversation-tab]) .chat-context
+{
+    padding-top: 16px;
+}
+
+:root:has(body[data-conversation-tab]) #member-list-body
+{
+    padding-right: 16px;
+    padding-left: 16px;
+}
+
+:root:has(body[data-conversation-tab]) #member-conversations-search
+{
+    margin-right: 16px;
+    margin-left: 16px;
+}
+
+:root:has(body[data-conversation-tab]) .single-chat-message
+{
+    padding-right: 18px;
+    padding-left: 18px;
+}
+
+/* The bar of the four screens on the dark frame: light icons; the shown screen has a ringed field behind its icon. */
+:root #member-conversations-tabs > button[aria-pressed="true"]
+{
+    background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20viewBox%3D%270%200%2058%2032%27%3E%20%3Crect%20x%3D%271%27%20y%3D%271%27%20width%3D%2756%27%20height%3D%2730%27%20rx%3D%2715%27%20fill%3D%27%23ffffff%27%20fill-opacity%3D%27.16%27%20stroke%3D%27%23eef0f2%27%20stroke-opacity%3D%27.9%27%20stroke-width%3D%271.2%27%2F%3E%20%3Crect%20x%3D%274.5%27%20y%3D%274.5%27%20width%3D%2749%27%20height%3D%2723%27%20rx%3D%2711.5%27%20fill%3D%27none%27%20stroke%3D%27%23ffffff%27%20stroke-opacity%3D%27.5%27%20stroke-width%3D%271.2%27%20stroke-dasharray%3D%270.1%203.2%27%20stroke-linecap%3D%27round%27%2F%3E%20%3C%2Fsvg%3E") center 7px / 58px 32px no-repeat;
+    font-weight: 700;
+}
+
+/* The message field and the search field are pressed into the panel and have a chrome rim; with the cursor inside, the rim is coloured. */
+:root #chat-input-container-text-input,
+:root #member-conversations-search input
+{
+    border: 1.5px solid transparent;
+    border-radius: 24px;
+    background: linear-gradient(180deg, #eef0f2, #ffffff) padding-box, var(--pocket-chrome) border-box;
+    box-shadow: var(--pocket-pressed-in);
+}
+
+:root #chat-input-container-text-input:focus,
+:root #member-conversations-search input:focus
+{
+    background: linear-gradient(#ffffff, #ffffff) padding-box, linear-gradient(120deg, #3d444c, #8d949b 60%, #d9dde1) border-box;
+    outline: 0;
+}
+
+:root #space-devider4
+{
+    border-top: 0;
+}
+
+/* Send: grey lacquer in a chrome ring */
+:root #chat-input-container-send-chat-input
+{
+    border: 2px solid transparent;
+    background: var(--pocket-lacquer) padding-box, var(--pocket-chrome-ring) border-box;
+    box-shadow: inset 0 1px 0 #ffffff59, 0 0 0 1px #7a8188, 0 8px 14px -8px #14171acc;
+}
+
+/* Messages: raised white leather for other people, grey lacquer with a stitched line for the user's own. */
+:root .single-chat-message-content-p
+{
+    border: 1px solid var(--pocket-hairline);
+    border-radius: 18px 18px 18px 6px;
+    background: var(--pocket-leather);
+    box-shadow: var(--pocket-raised);
+}
+
+:root .single-chat-message-content-p.local-single-chat-message-content-p
+{
+    border: 1px solid #1a1e22;
+    border-radius: 18px 18px 6px 18px;
+    background: var(--pocket-lacquer);
+    box-shadow: inset 0 1px 0 #ffffff59, 0 1px 1px #14171a33, 0 10px 16px -10px #14171acc;
+    outline: 1px dashed #ffffff73;
+    outline-offset: -4px;
+}
+
+/* Rows of the channel tree, of the people list and of the Me screen: raised leather; the tree and the Me screen with a stitched line inside the edge. */
+:root #space-devider1 .single-channel,
+:root #member-list-body .member-list-client,
+:root:has(body[data-conversation-tab="me"]) #connections-menu,
+:root:has(body[data-conversation-tab="me"]) #communication-system-head-menu > :is(#choose-theme-button, #local-settings-button),
+:root:has(body[data-conversation-tab="me"]) #show-hide-log-button
+{
+    border: 1px solid var(--pocket-hairline);
+    box-shadow: var(--pocket-raised);
+}
+
+:root #space-devider1 .single-channel,
+:root:has(body[data-conversation-tab="me"]) #connections-menu,
+:root:has(body[data-conversation-tab="me"]) #communication-system-head-menu > :is(#choose-theme-button, #local-settings-button),
+:root:has(body[data-conversation-tab="me"]) #show-hide-log-button
+{
+    outline: 1.5px dashed var(--pocket-thread);
+    outline-offset: -5px;
+}
+
+:root #space-devider1 .single-channel,
+:root #member-list-body .member-list-client
+{
+    background: var(--pocket-leather);
+}
+
+:root #member-list-body .member-list-client
+{
+    margin-bottom: 8px;
+    border-radius: 16px;
+}
+
+/* the user's channel: grey lacquer with a chrome border and a light seam */
+:root #space-devider1 .single-channel-current
+{
+    border: 2px solid transparent;
+    background: var(--pocket-lacquer) padding-box, var(--pocket-chrome) border-box;
+    box-shadow: inset 0 1px 0 #ffffff4d, 0 1px 1px #14171a33, 0 10px 18px -8px #14171aa6;
+    outline-color: #ffffff80;
+    color: #ffffff;
+}
+
+:root #space-devider1 .single-channel-current .single-channel-name-p
+{
+    color: #ffffff !important;
+}
+
+:root #space-devider1 .single-channel-current .single-channel-collapse-button
+{
+    background: #e1e5e8;
+}
+
+/* Pictures of people: a light ring, a tan ring and a shadow. */
+:root #member-list-body .member-list-client > .client-audio-state,
+:root body #space-devider1 .connected-client > .client-audio-state,
+:root #member-conversations-profile > .client-audio-state,
+:root .chat-message-avatar
+{
+    border: 0;
+    box-shadow: 0 0 0 1.5px #ffffff, 0 0 0 3px #aab1b8, 0 5px 9px -3px #14171a80;
+}
+
+/* The local settings window in Pocket's look: a dark grey band with the title and the tabs, the white
+   quilted page under it, each setting on a raised field, controls with a chrome rim, grey buttons. */
+:root #local-settings-container
+{
+    background: var(--pocket-quilt) 0 0 / 40px 60px, #f3f5f6;
+}
+
+:root #local-settings-container > #menu-bar-container
+{
+    border-radius: 0;
+    background: radial-gradient(120% 140% at 0 0, #ffffff40, #ffffff14 32%, #ffffff00 58%), linear-gradient(180deg, #15181b, #2a2f34);
+}
+
+:root #local-settings-title
+{
+    color: #ffffff;
+    text-shadow: 0 1px 2px #00000080;
+}
+
+:root #local-settings-container #local-settings-x-button
+{
+    border: 2px solid transparent;
+    background: radial-gradient(circle at 34% 24%, #ffffff, #eceff1 60%, #c9cfd5) padding-box, var(--pocket-chrome-ring) border-box;
+    box-shadow: 0 0 0 1px #7a8188, 0 4px 8px -2px #00000080;
+}
+
+/* the tabs stand on the grey band; the shown one is a raised white field */
+:root #local-settings-tabs
+{
+    gap: 4px;
+    padding: 4px 8px 10px;
+    border-bottom: 2px solid;
+    border-image: var(--pocket-chrome) 1;
+    background: linear-gradient(180deg, #2a2f34, #24282c);
+    box-shadow: 0 6px 10px -4px #14171a80;
+}
+
+:root #local-settings-tabs .local-settings-tab
+{
+    padding: 8px 12px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: #b9c0c7;
+}
+
+:root #local-settings-tabs .local-settings-tab[aria-selected="true"]
+{
+    background: var(--pocket-leather);
+    box-shadow: var(--pocket-raised);
+    color: var(--mono-text);
+}
+
+:root #local-settings-scroll
+{
+    padding: 2px 14px 20px;
+}
+
+:root #local-settings-container .local-settings-section-title
+{
+    margin: 18px 6px 10px;
+    font-weight: 700;
+}
+
+:root #local-settings-container .local-settings-row
+{
+    margin-bottom: 8px;
+    padding: 12px 14px;
+    border: 1px solid var(--pocket-hairline);
+    border-radius: 14px;
+    background: var(--pocket-leather);
+    box-shadow: var(--pocket-raised);
+}
+
+/* a check box: pressed in while empty, grey with a white tick while set */
+:root body #local-settings-container .local-settings-row input[type="checkbox"]
+{
+    flex: 0 0 26px;
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
+    margin: 0 0 0 10px;
+    border: 1.5px solid transparent;
+    border-radius: 8px;
+    background: linear-gradient(180deg, #eef0f2, #ffffff) padding-box, var(--pocket-chrome) border-box;
+    box-shadow: var(--pocket-pressed-in);
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+:root body #local-settings-container .local-settings-row input[type="checkbox"]:checked
+{
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E") center / 18px no-repeat padding-box,
+                var(--pocket-lacquer) padding-box, var(--pocket-chrome-ring) border-box;
+    box-shadow: inset 0 1px 0 #ffffff59, 0 2px 4px #14171a59;
+}
+
+/* the slider: a pressed-in track and a grey knob in a chrome ring */
+:root #local-settings-container input[type="range"]
+{
+    height: 10px;
+    border-radius: 5px;
+    background: linear-gradient(180deg, #dfe3e6, #f4f6f7);
+    box-shadow: var(--pocket-pressed-in);
+    appearance: none;
+    -webkit-appearance: none;
+}
+
+:root #local-settings-container input[type="range"]::-webkit-slider-thumb
+{
+    width: 26px;
+    height: 26px;
+    border: 3px solid transparent;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 24%, #aeb5bc, #3d444c 58%, #1e2226) padding-box, var(--pocket-chrome-ring) border-box;
+    box-shadow: 0 0 0 1px #7a8188, 0 3px 6px #14171a80;
+    -webkit-appearance: none;
+}
+
+:root #local-settings-container input[type="range"]::-moz-range-thumb
+{
+    width: 20px;
+    height: 20px;
+    border: 3px solid transparent;
+    border-radius: 50%;
+    background: radial-gradient(circle at 34% 24%, #aeb5bc, #3d444c 58%, #1e2226) padding-box, var(--pocket-chrome-ring) border-box;
+    box-shadow: 0 0 0 1px #7a8188, 0 3px 6px #14171a80;
+}
+
+/* lists and number fields: pressed in, with the chrome rim of the other fields */
+:root #local-settings-container :is(select, input[type="number"], input[type="text"])
+{
+    border: 1.5px solid transparent;
+    border-radius: 12px;
+    background: linear-gradient(180deg, #eef0f2, #ffffff) padding-box, var(--pocket-chrome) border-box;
+    box-shadow: var(--pocket-pressed-in);
+    color: var(--mono-text);
+}
+
+/* buttons: grey in a chrome ring, as the Send button */
+:root #local-settings-container :is(input[type="button"], button):not(.local-settings-tab, .local-settings-segment)
+{
+    border: 2px solid transparent;
+    border-radius: 14px;
+    background: var(--pocket-lacquer) padding-box, var(--pocket-chrome-ring) border-box;
+    box-shadow: inset 0 1px 0 #ffffff59, 0 0 0 1px #7a8188, 0 8px 14px -8px #14171acc;
+    color: #ffffff;
+}
+
+:root #local-settings-container #local-settings-close-button
+{
+    border: 2px solid transparent;
+    border-radius: 14px;
+    background: var(--pocket-lacquer) padding-box, var(--pocket-chrome-ring) border-box;
+    box-shadow: inset 0 1px 0 #ffffff59, 0 0 0 1px #7a8188, 0 8px 14px -8px #14171acc;
+    color: #ffffff;
+}
+
+/* a choice of two: a pressed-in field, the chosen part grey */
+:root #local-settings-mic-mode-segmented
+{
+    padding: 3px;
+    border: 1.5px solid transparent;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #eef0f2, #ffffff) padding-box, var(--pocket-chrome) border-box;
+    box-shadow: var(--pocket-pressed-in);
+}
+
+:root #local-settings-container .local-settings-segment
+{
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--mono-text);
+}
+
+:root #local-settings-container .local-settings-segment.segment-selected
+{
+    background: var(--pocket-lacquer);
+    box-shadow: inset 0 1px 0 #ffffff59, 0 2px 4px #14171a59;
+    color: #ffffff;
+}

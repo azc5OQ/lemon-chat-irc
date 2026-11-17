@@ -1,0 +1,1165 @@
+/* Shared conversation and people layouts for Mono, Pocket and Simple. Theme variables supply the accent colors. */
+:root
+{
+    --phone-accent: var(--mono-text);
+    --phone-accent-soft: var(--mono-surface);
+    --phone-accent-text: var(--mono-inverse);
+    /* The channel picture opens the picker; Pocket uses its Channels screen. */
+    --member-conversations-rooms: 1;
+    --phone-bar-buttons: 88px;
+    /* the microphone of the talk button and the arrow of the Send button, each in a dark and in a light colour;
+       a theme with a light accent colour picks the dark ones */
+    --phone-microphone-dark: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2319191c%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%228%22%20y%3D%222%22%20width%3D%228%22%20height%3D%2213%22%20rx%3D%224%22%2F%3E%3Cpath%20d%3D%22M5%2010v2a7%207%200%200%200%2014%200v-2M12%2019v3M8%2022h8%22%2F%3E%3C%2Fsvg%3E");
+    --phone-microphone-light: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%228%22%20y%3D%222%22%20width%3D%228%22%20height%3D%2213%22%20rx%3D%224%22%2F%3E%3Cpath%20d%3D%22M5%2010v2a7%207%200%200%200%2014%200v-2M12%2019v3M8%2022h8%22%2F%3E%3C%2Fsvg%3E");
+    --phone-microphone-icon: var(--phone-microphone-light);
+    --phone-send-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2319191c' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M5.5 11.5 12 5l6.5 6.5'/%3E%3C/svg%3E");
+    --phone-send-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 19V5M5.5 11.5 12 5l6.5 6.5'/%3E%3C/svg%3E");
+    --phone-send-icon: var(--phone-send-light);
+    /* The microphone stays above the composer; Pocket adds its navigation bar to this bottom inset. */
+    --mono-bottom: env(safe-area-inset-bottom, 0px);
+    --phone-microphone-chat-space: 0px;
+    --phone-microphone-list-space: 0px;
+    --phone-composer-extra: 0px;
+    --phone-composer-height: calc(64px + var(--phone-composer-extra));
+}
+
+/* An attached picture fits inside the field without a separate text row. Hidden chats keep the list microphone's
+   usual position, even if a picture is waiting in that chat. */
+:root:not(:has(#hide-chat-button.chat-hidden)):is(:not(:has(body[data-conversation-tab])), :has(body[data-conversation-tab="chat"])):has(#image-upload-preview:not([style*="display: none"]))
+{
+    --phone-composer-extra: 40px;
+}
+
+/* A server without voice, or a channel without audio: no talk button. */
+:root:has(body:is(.server-voice-disabled, .current-channel-audio-disabled)) :is(#toggle-microphone-label, #microphone-push-to-talk-button-touch-device)
+{
+    display: none !important;
+}
+
+/* Not shown in this layout: the saved servers button, the captions of Mono's bottom bar and the band behind them. */
+:root #bookmarks-menu
+{
+    display: none !important;
+}
+
+:root #communication-system-container::before,
+:root #communication-system-container::after,
+:root #head-menu-left-group::before
+{
+    content: none;
+}
+
+/* A button for something this server does not allow is not shown. */
+:root .chat-file-uploads-off,
+:root .custom-file-upload-button[aria-disabled="true"]
+{
+    display: none !important;
+}
+
+/* The list screen: the user's name on the left, appearance and settings on the right. */
+:root #communication-system-head-menu > #local-settings-button
+{
+    inset: calc(4px + env(safe-area-inset-top, 0px)) 10px auto auto;
+}
+
+:root #communication-system-head-menu > #choose-theme-button
+{
+    inset: calc(4px + env(safe-area-inset-top, 0px)) 70px auto auto;
+}
+
+:root #connections-menu
+{
+    top: calc(4px + env(safe-area-inset-top, 0px));
+    right: 130px;
+}
+
+:root #communication-system-head-menu::after,
+:root #head-menu-left-group::after,
+:root:has(#hide-chat-button.chat-hidden) #head-menu-left-group::after,
+:root #connections-menu::after
+{
+    position: fixed;
+    top: calc(46px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    left: auto;
+    width: 60px;
+    color: var(--mono-muted);
+    font: 12px/16px var(--set-font);
+    text-align: center;
+    pointer-events: none;
+}
+
+:root #communication-system-head-menu::after
+{
+    content: "Settings";
+    right: 2px;
+}
+
+:root #head-menu-left-group::after,
+:root:has(#hide-chat-button.chat-hidden) #head-menu-left-group::after
+{
+    content: "Look";
+    right: 62px;
+}
+
+:root #connections-menu::after
+{
+    content: "Server";
+    right: 122px;
+}
+
+:root #member-conversations-profile
+{
+    width: calc(100% - 140px);
+}
+
+/* Show the back arrow, conversation title and toolbar actions above chat. Keep the local profile on the people screen. */
+:root:has(#hide-chat-button.chat-hidden) #communication-system-head-menu > #hide-chat-button,
+:root:not(:has(#hide-chat-button.chat-hidden)) #communication-system-head-menu > #msgr-me-button,
+:root:not(:has(#hide-chat-button.chat-hidden)) #member-conversations-profile
+{
+    display: none !important;
+}
+
+:root:not(:has(#hide-chat-button.chat-hidden)) :is(#communication-system-head-menu, #head-menu-left-group, #connections-menu)::after
+{
+    content: none;
+}
+
+/* in a conversation the buttons stand on the line of the back arrow, 44px apart */
+:root:not(:has(#hide-chat-button.chat-hidden)) #communication-system-head-menu > #local-settings-button
+{
+    inset: calc(12px + env(safe-area-inset-top, 0px)) calc(6px + var(--phone-side)) auto auto;
+}
+
+:root:not(:has(#hide-chat-button.chat-hidden)) #communication-system-head-menu > #choose-theme-button
+{
+    inset: calc(12px + env(safe-area-inset-top, 0px)) calc(50px + var(--phone-side)) auto auto;
+}
+
+:root:not(:has(#hide-chat-button.chat-hidden)) #connections-menu
+{
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    right: calc(94px + var(--phone-side));
+}
+
+:root #communication-system-head-menu > #hide-chat-button
+{
+    inset: calc(12px + env(safe-area-inset-top, 0px)) auto auto 6px;
+    background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%2319191c%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M15%205l-7%207%207%207%22%2F%3E%3C%2Fsvg%3E") !important;
+    background-position: center;
+}
+
+/* Use the active conversation tab as the toolbar title and hide the other tabs. */
+:root:not(:has(#hide-chat-button.chat-hidden)) #communication-system-head-menu
+{
+    background: transparent;
+}
+
+:root #chat-context-selectors-container
+{
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    left: 56px;
+    right: 12px;
+    display: block;
+    width: auto;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    overflow: hidden;
+}
+
+:root .chat-context-selector
+{
+    display: none;
+}
+
+/* Without the bar of screens the name ends where the buttons begin: three buttons of 44px, or the width a
+   theme with fewer buttons gives in --phone-bar-buttons. */
+:root:not(:has(body[data-conversation-tab])) #chat-context-selectors-container
+{
+    right: calc(12px + var(--phone-bar-buttons, 132px) + var(--phone-side));
+}
+
+/* the open conversation's tab has a background colour written into its style attribute */
+:root .chat-context-selector[style*="background-color"]
+{
+    display: flex;
+    align-items: center;
+    max-width: 100%;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent !important;
+    color: var(--mono-text);
+    font: 600 18px/44px var(--set-font);
+}
+
+:root .chat-context-selector :is(p, .p-container)
+{
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    font: inherit;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* the "#" sign and the name of a room stand in one row */
+:root .chat-context-selector .p-container
+{
+    display: flex;
+    align-items: center;
+}
+
+:root .chat-context-selector[data-chat-context-selector-type="channel"] .p-container::before
+{
+    content: "#";
+    flex: 0 0 auto;
+    margin-right: 6px;
+    color: var(--mono-muted);
+}
+
+:root .remove-chat-context-selector
+{
+    display: none !important;
+}
+
+/* Show the conversation avatar, name and one line of context supplied by member-conversations.js. */
+:root:has(body.member-conversations-active) .chat-context-selector[style*="background-color"]
+{
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-rows: 22px 18px;
+    column-gap: 10px;
+    align-content: center;
+    font: 600 17px/22px var(--set-font);
+}
+
+:root:has(body.member-conversations-active) .chat-context-selector[style*="background-color"]::before
+{
+    content: attr(data-conversation-initials);
+    display: grid;
+    grid-row: 1 / span 2;
+    place-items: center;
+    box-sizing: border-box;
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--mono-line);
+    border-radius: 50%;
+    background: var(--conversation-picture, none) center / cover no-repeat var(--mono-surface);
+    color: var(--mono-text);
+    font: 550 14px/1 var(--set-font);
+}
+
+:root:has(body.member-conversations-active) .chat-context-selector[style*="background-color"] > .p-container
+{
+    grid-column: 2;
+    grid-row: 1;
+}
+
+:root:has(body.member-conversations-active) .chat-context-selector[style*="background-color"]::after
+{
+    content: attr(data-conversation-status);
+    grid-column: 2;
+    grid-row: 2;
+    overflow: hidden;
+    color: var(--mono-muted);
+    font: 400 12px/18px var(--set-font);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* without a line the name stands in the middle of the bar */
+:root:has(body.member-conversations-active) .chat-context-selector[style*="background-color"]:is(:not([data-conversation-status]), [data-conversation-status=""]) > .p-container
+{
+    grid-row: 1 / span 2;
+    align-self: center;
+}
+
+/* the picture of a channel holds the "#" sign, so the name has none */
+:root:has(body.member-conversations-active) .chat-context-selector[data-chat-context-selector-type="channel"] .p-container::before
+{
+    content: none;
+}
+
+/* The talk button stays in the bottom centre, above the composer, in chats and lists. Send keeps its own
+   place in the composer even when there is no text. The microphone's state appears above the button. */
+:root
+{
+    --phone-microphone-text: "Hold to talk";
+}
+
+:root:has(.local-settings-segment[data-mic-mode="continuous"].segment-selected)
+{
+    --phone-microphone-text: "Tap to talk";
+}
+
+:root:has(#microphone-push-to-talk-button-touch-device.ptt-pressed)
+{
+    --phone-microphone-text: "You are talking";
+}
+
+:root:has(#microphone-push-to-talk-button-touch-device.mic-continuous-active)
+{
+    --phone-microphone-text: "Microphone is on";
+}
+
+:root:has(#microphone-push-to-talk-button-touch-device.mic-unavailable)
+{
+    --phone-microphone-text: "Microphone is not available";
+}
+
+/* Leave room at the end of each scrolling view for the button and its active-state caption. Lists do not
+   have a composer, so they also reserve its 64px height to keep the button in the same place. */
+:root:has(:is(#toggle-microphone-label, #microphone-push-to-talk-button-touch-device)[style*="display: block"]):not(:has(body:is(.server-voice-disabled, .current-channel-audio-disabled)))
+{
+    --phone-microphone-chat-space: 112px;
+    --phone-microphone-list-space: 176px;
+}
+
+:root #chat-context-container
+{
+    padding-bottom: max(16px, var(--phone-microphone-chat-space));
+    scroll-padding-bottom: var(--phone-microphone-chat-space);
+}
+
+/* Keep theme colors and size on the round talk button, including its active state. */
+:root #toggle-microphone-label,
+:root #toggle-microphone:checked ~ #toggle-microphone-label,
+:root #microphone-push-to-talk-button-touch-device
+{
+    inset: auto auto calc(var(--mono-bottom) + var(--phone-composer-height) + 12px) 50%;
+    box-sizing: border-box;
+    width: 46px;
+    height: 46px;
+    border: 3px solid transparent;
+    border-radius: 50%;
+    background: var(--tabs-talk-background, var(--phone-microphone-icon) center / 22px no-repeat var(--phone-accent));
+    box-shadow: var(--tabs-talk-shadow, none);
+    font-size: 0;
+    filter: none;
+    transform: translateX(-50%);
+    transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+/* Default suppresses the inline microphone image with !important. This layout draws its own icon;
+   restore it with the theme's contrasting colour. Pocket keeps its layered button background. */
+:root:not(:has(body[data-conversation-tab])) #toggle-microphone-label
+{
+    background-image: var(--phone-microphone-icon) !important;
+}
+
+:root #microphone-push-to-talk-button-touch-device:is(.ptt-pressed, .mic-continuous-active),
+:root #toggle-microphone:checked ~ #toggle-microphone-label
+{
+    background: var(--tabs-talk-background-on, var(--phone-microphone-icon) center / 22px no-repeat var(--phone-accent));
+    box-shadow: var(--tabs-talk-shadow-on, 0 0 0 4px var(--mono-bg), 0 0 0 6px var(--phone-accent));
+    transform: translateX(-50%) scale(1.06);
+}
+
+:root #microphone-push-to-talk-button-touch-device.mic-unavailable
+{
+    filter: grayscale(1);
+    opacity: 0.55;
+}
+
+:root #toggle-microphone-label::before
+{
+    content: none;
+}
+
+/* Mono's "Voice" caption in body::after is not shown in this layout. */
+:root body::after
+{
+    content: none;
+}
+
+/* the state in words is shown above the button while the microphone sends; the label of the tap-to-talk
+   button draws them itself, for the hold-to-talk button they come from body::after */
+:root #toggle-microphone ~ #toggle-microphone-label::after
+{
+    content: none;
+}
+
+:root #toggle-microphone:checked ~ #toggle-microphone-label::after,
+:root:has(#toggle-microphone-label[style*="display: none"]):not(:has(#microphone-push-to-talk-button-touch-device[style*="display: none"])):has(#microphone-push-to-talk-button-touch-device:is(.ptt-pressed, .mic-continuous-active)) body::after
+{
+    content: var(--phone-microphone-text);
+    position: fixed;
+    inset: auto auto calc(var(--mono-bottom) + var(--phone-composer-height) + 72px) 50%;
+    width: auto;
+    height: auto;
+    padding: 4px 13px;
+    border: var(--tabs-talk-words-border, 0);
+    border-radius: 15px;
+    background: var(--tabs-talk-words-background, var(--phone-accent));
+    box-shadow: var(--tabs-talk-words-shadow, none);
+    transform: translateX(-50%);
+    color: var(--phone-accent-text);
+    font: 600 12px/18px var(--set-font);
+    white-space: nowrap;
+    z-index: 46;
+}
+
+:root #toggle-microphone:checked ~ #toggle-microphone-label::after
+{
+    content: "Microphone is on";
+    position: absolute;
+    inset: auto auto calc(100% + 14px) 50%;
+}
+
+/* One scrolling page holds search, the current channel and people. */
+:root #member-list-container
+{
+    padding-bottom: var(--phone-microphone-list-space);
+    scroll-padding-bottom: var(--phone-microphone-list-space);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+:root #member-list-body
+{
+    flex: 0 0 auto;
+    overflow: visible;
+}
+
+:root #member-list-header
+{
+    padding: 14px 20px 6px;
+    color: var(--mono-muted);
+    font: 600 14px/20px var(--set-font);
+}
+
+/* Keep channel names as ordinary chat links. The picture has its own picker action. */
+:root #member-list-body .member-list-channel
+{
+    margin-bottom: 1px;
+    border-bottom: 0;
+    border-radius: 12px;
+}
+
+:root #member-list-body .member-conversations-channel-switch
+{
+    cursor: pointer;
+    touch-action: pan-y;
+}
+
+:root #member-list-body :is(.member-conversations-channel-switch, .member-list-channel-name[role="button"]):focus-visible
+{
+    outline: 2px solid var(--mono-text);
+    outline-offset: 3px;
+}
+
+:root #member-list-body .member-conversations-channel-switch::after
+{
+    content: "";
+    position: absolute;
+    right: -3px;
+    bottom: -2px;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--mono-bg);
+    border-radius: 50%;
+    background: var(--mono-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a828a' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 14px no-repeat;
+    pointer-events: none;
+}
+
+:root #member-conversations-search
+{
+    display: block;
+    flex: 0 0 auto;
+}
+
+:root #member-conversations-search-input
+{
+    width: 100%;
+    min-width: 0;
+}
+
+/* People: larger names and previews than in Mono. */
+:root #member-list-body :is(.connected-client-p, .connected-client-p-music-bot)
+{
+    font-size: 17px;
+}
+
+/* Default's bot colour is important; use this palette's readable text colour in the phone list. */
+:root #member-list-body .member-list-client .connected-client-p-music-bot
+{
+    color: var(--mono-text) !important;
+}
+
+:root #member-list-body :is(.member-conversation-preview, .member-list-presence, .member-list-client-channel)
+{
+    font-size: 14px;
+}
+
+:root #member-list-body :is(.connected-client-p-received-messages-number, .member-list-channel-unread):not(.unread-empty)
+{
+    background: var(--phone-accent) !important;
+    color: var(--phone-accent-text) !important;
+}
+
+/* Messages as bubbles; the user's own messages have the accent colour and are on the right. */
+:root .single-chat-message
+{
+    min-height: 0;
+    padding: 5px 14px;
+}
+
+:root .single-chat-message:hover
+{
+    background: transparent;
+}
+
+:root .single-chat-message-content-p,
+:root .single-chat-message-content-p:hover
+{
+    display: inline-block;
+    width: auto;
+    max-width: 84%;
+    padding: 9px 14px !important;
+    border-radius: 18px;
+    background: var(--mono-surface);
+    font-size: 16px !important;
+    text-align: left;
+}
+
+:root .local-single-chat-message-content-p,
+:root .local-single-chat-message-content-p:hover,
+:root .single-chat-message:has(.single-chat-message-sender-local-username-container) .single-chat-message-content-p
+{
+    background: var(--phone-accent);
+    color: var(--phone-accent-text) !important;
+}
+
+:root .single-chat-message:has(.single-chat-message-sender-local-username-container) .single-message-content
+{
+    text-align: right;
+}
+
+:root .single-chat-message-sender-local-username-container
+{
+    display: none;
+}
+
+:root #chat-input-container-text-input
+{
+    font-size: 16px;
+}
+
+:root #chat-input-container-send-chat-input
+{
+    background-color: var(--phone-accent);
+    color: var(--phone-accent-text);
+    border-color: transparent;
+    text-transform: capitalize;
+}
+
+/* Place short timestamps inside bubbles. Show sender names once per message run in channels and hide them in private chats. */
+:root:has(body.member-conversations-active) .single-chat-message
+{
+    padding: 1px 12px;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message:not(.chat-message-same-sender)
+{
+    padding-top: 8px;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message:has(.single-chat-message-sender-local-username-container)
+{
+    text-align: right;
+}
+
+/* Preserve readable outgoing bubble text when custom message fonts are disabled. */
+:root body.chat-use-theme-formatting #chat-context-container .single-chat-message:has(.single-chat-message-sender-local-username-container) .single-chat-message-content-p,
+:root body.chat-use-theme-formatting #chat-context-container .single-chat-message:has(.single-chat-message-sender-local-username-container) .single-chat-message-content-p :is(span, font, b, strong, i, em, u, s, strike, small, big, sub, sup, a, code, pre)
+{
+    color: var(--phone-accent-text) !important;
+}
+
+/* one grid cell holds the bubble and the time, so the time can stand in the corner of the bubble; the
+   box is as wide as the bubble (fit-content), or the time of a short message stands beside its bubble */
+:root:has(body.member-conversations-active) .single-chat-message .single-message-content
+{
+    display: inline-grid;
+    grid-template-columns: minmax(0, auto);
+    width: fit-content;
+    max-width: 84%;
+    text-align: left;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message-sender-username-container
+{
+    grid-row: 1;
+    margin: 0 0 2px 12px;
+    color: var(--mono-muted);
+    font: 600 13px/18px var(--set-font);
+}
+
+:root:has(body.member-conversations-active) .chat-context[id^="chat-context-pm-"] .single-chat-message-sender-username-container,
+:root:has(body.member-conversations-active) .single-chat-message.chat-message-same-sender .single-chat-message-sender-username-container
+{
+    display: none;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message .single-chat-message-content
+{
+    grid-row: 2;
+    grid-column: 1;
+    min-width: 0;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message-content-p,
+:root:has(body.member-conversations-active) .single-chat-message-content-p:hover
+{
+    max-width: 100%;
+    padding: 8px 12px !important;
+}
+
+/* an empty piece at the end of the last line keeps the text away from the time */
+:root:has(body.member-conversations-active) .single-chat-message-content-p::after
+{
+    content: "";
+    display: inline-block;
+    width: 38px;
+    height: 1px;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message:has(.single-chat-message-content-p) .single-chat-message-sender-time
+{
+    grid-row: 2;
+    grid-column: 1;
+    align-self: end;
+    justify-self: end;
+    z-index: 1;
+    margin: 0 10px 5px 0;
+    color: var(--mono-muted);
+    font: 11px/14px var(--set-font);
+    pointer-events: none;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message:has(.single-chat-message-sender-local-username-container):has(.single-chat-message-content-p) .single-chat-message-sender-time
+{
+    color: var(--phone-accent-text);
+    opacity: 0.72;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message-sender-time p
+{
+    margin: 0;
+    color: inherit;
+    font: inherit;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message-sender-time p[data-short-time]
+{
+    font-size: 0;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message-sender-time p[data-short-time]::after
+{
+    content: attr(data-short-time);
+    font-size: 11px;
+}
+
+/* Place reply quotes above the bubble without widening it. Reserve 36px for two quote lines or 52px when a state line is present. Align outgoing quotes to the right. */
+:root:has(body.member-conversations-active) .single-chat-message .single-chat-message-content:has(> .chat-reply-quote)
+{
+    position: relative;
+    margin-top: 36px;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message .single-chat-message-content:has(> .chat-reply-quote .chat-reply-status:not([hidden]))
+{
+    margin-top: 52px;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message .chat-reply-quote
+{
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 16px;
+    display: block;
+    width: max-content;
+    max-width: min(72vw, 320px);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--mono-muted);
+    font: 12px/16px var(--set-font);
+    text-align: left;
+}
+
+/* the thin line from the first line of the quote down to the bubble */
+:root:has(body.member-conversations-active) .single-chat-message .chat-reply-quote::before
+{
+    content: "";
+    position: absolute;
+    top: 8px;
+    bottom: -4px;
+    left: -11px;
+    width: 7px;
+    border-top: 1px solid var(--mono-muted);
+    border-left: 1px solid var(--mono-muted);
+    border-top-left-radius: 5px;
+    pointer-events: none;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message .chat-reply-content
+{
+    display: block;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+}
+
+/* Termix's small picture of the sender is left out: the quote keeps the whole width for its text */
+:root:has(body.member-conversations-active) .single-chat-message .chat-reply-content::before
+{
+    content: none;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message .chat-reply-quote strong
+{
+    display: block;
+    color: var(--mono-text);
+}
+
+:root:has(body.member-conversations-active) .single-chat-message .chat-reply-text
+{
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 1;
+}
+
+/* the state of the quote, shown when the answered message is not in the loaded history: one line */
+:root:has(body.member-conversations-active) .single-chat-message .chat-reply-status
+{
+    overflow: hidden;
+    color: var(--mono-muted);
+    line-height: 16px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 1;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message:has(.single-chat-message-sender-local-username-container) .chat-reply-quote
+{
+    right: 16px;
+    left: auto;
+    text-align: right;
+}
+
+:root:has(body.member-conversations-active) .single-chat-message:has(.single-chat-message-sender-local-username-container) .chat-reply-quote::before
+{
+    right: -11px;
+    left: auto;
+    border-right: 1px solid var(--mono-muted);
+    border-left: 0;
+    border-top-left-radius: 0;
+    border-top-right-radius: 5px;
+}
+
+/* The public keys at the start of a conversation with a person are not shown in this layout. */
+.server-message-public-key
+{
+    display: none !important;
+}
+
+/* The words of the microphone bar are not drawn on a server without voice. */
+:root:has(body:is(.server-voice-disabled, .current-channel-audio-disabled)) body::after
+{
+    content: none !important;
+}
+
+/* The picture circle of a person is shown on a server without voice too; the general layout rules hide it there. */
+:root body #member-list-body .member-list-client > .client-audio-state
+{
+    display: block !important;
+}
+
+:root body #member-list-body .member-list-client > .client-audio-state[data-initials]::before
+{
+    display: flex !important;
+}
+
+/* The message field, the picture and file buttons and the send button stand in one row. */
+:root #space-devider2
+{
+    inset: 0 0 var(--phone-composer-height) !important;
+}
+
+:root #space-devider4
+{
+    height: var(--phone-composer-height) !important;
+    padding: 8px 10px;
+}
+
+:root:not(:has(#hide-chat-button.chat-hidden)) #space-devider4
+{
+    display: flex !important;
+    align-items: center;
+    gap: 6px;
+}
+
+:root #space-devider4 .chat-controls-container
+{
+    display: contents;
+}
+
+:root #chat-input-file-input-container
+{
+    order: 2;
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    height: calc(48px + var(--phone-composer-extra));
+    --pending-image-width: min(clamp(48px, calc(64px * var(--pending-image-ratio, 1.5)), 160px), max(40px, calc(100% - 96px)));
+}
+
+:root #space-devider4 #chat-input-file-input-container:has(#image-upload-preview:not([style*="display: none"])) #chat-input-container-text-input
+{
+    height: calc(48px + var(--phone-composer-extra));
+    padding: 12px 14px 12px calc(var(--pending-image-width) + 24px);
+}
+
+:root #space-devider4:has(#image-upload-preview:not([style*="display: none"]))
+{
+    align-items: flex-end;
+}
+
+:root div#image-upload-preview
+{
+    top: 12px;
+    left: 12px;
+    height: 64px;
+}
+
+:root #space-devider4 :is(#play-pause-song-container, #upload-image-container, #upload-file-container, #upload-video-stream-container)
+{
+    order: 1;
+}
+
+:root #chat-input-container-send-chat-input
+{
+    order: 3;
+    flex: 0 0 auto;
+    height: 44px;
+    margin: 0;
+    border-radius: 22px;
+    font: 600 15px/44px var(--set-font);
+}
+
+/* The Send button without the bar of screens: a circle with an arrow, as in a messenger. */
+:root:not(:has(body[data-conversation-tab])) #chat-input-container-send-chat-input
+{
+    width: 46px;
+    min-width: 46px;
+    height: 46px;
+    padding: 0;
+    border-radius: 50%;
+    background-image: var(--phone-send-icon);
+    background-position: center;
+    background-size: 22px 22px;
+    background-repeat: no-repeat;
+    font-size: 0;
+}
+
+/* The place of a button that is not shown is not kept empty. */
+:root #space-devider4 :is(#upload-image-container, #upload-file-container):has(.chat-file-uploads-off, [aria-disabled="true"])
+{
+    display: none !important;
+}
+
+/* The list of channels opens as a sheet at the bottom of the screen, within reach of the thumb. */
+:root .channel-list-context-menu:has(.channel-switch-menu-item)
+{
+    position: fixed !important;
+    inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px)) 8px !important;
+    width: auto !important;
+    max-width: none;
+    max-height: 60dvh;
+    padding: 6px 0 8px;
+    border-radius: 20px;
+    box-shadow: 0 0 0 100vmax #00000040, 0 -8px 32px #00000026;
+    /* above the talk bar */
+    z-index: 60;
+}
+
+:root .channel-list-context-menu:has(.channel-switch-menu-item) .channel-list-context-menu-items
+{
+    display: block;
+    width: 100%;
+}
+
+:root .channel-list-context-menu:has(.channel-switch-menu-item) .context-menu-item
+{
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 52px;
+    margin: 0;
+    padding: 0 20px;
+    font: 500 17px/24px var(--set-font);
+}
+
+/* the first line names the list */
+:root .channel-list-context-menu:has(.channel-switch-menu-item) .context-menu-item:first-child
+{
+    min-height: 40px;
+    color: var(--mono-muted);
+    font: 600 14px/20px var(--set-font);
+}
+
+/* the channel the user is in, and a Join button on every other channel */
+:root .channel-list-context-menu .channel-list-context-menu-items .channel-switch-menu-item.context-menu-item-disabled
+{
+    color: var(--mono-text) !important;
+    font-weight: 600;
+    opacity: 1 !important;
+}
+
+/* the holder of the menus has its own stacking order, so it is raised above the talk bar while the list of channels is open */
+:root #contextmenus-container:has(.channel-switch-menu-item)
+{
+    z-index: 60;
+}
+
+:root .channel-switch-menu-item::after
+{
+    content: "Join";
+    margin-left: auto;
+    padding: 6px 16px;
+    border-radius: 16px;
+    background: var(--phone-accent);
+    color: var(--phone-accent-text);
+    font: 600 14px/20px var(--set-font);
+}
+
+:root .channel-switch-menu-item.context-menu-item-disabled::after
+{
+    content: "you are here";
+    padding: 6px 0;
+    background: transparent;
+    color: var(--mono-muted);
+    font-weight: 400;
+}
+
+/* The button for playing a song is made visible by the page when a song can be played; until then it takes no place. */
+:root #play-pause-song-container:not([style*="visible"])
+{
+    display: none !important;
+}
+
+/* On a wide screen the layout keeps the width of a phone and stands in the middle of the window. */
+:root
+{
+    --phone-side: max(0px, calc((100vw - 760px) / 2));
+}
+
+:root #communication-system-head-menu,
+:root #communication-system-container > #communication-system-head-menu
+{
+    left: var(--phone-side);
+    right: var(--phone-side);
+}
+
+:root #communication-system-container
+{
+    left: var(--phone-side) !important;
+    right: var(--phone-side) !important;
+    width: auto !important;
+}
+
+:root #communication-system-head-menu > #msgr-me-button
+{
+    left: calc(14px + var(--phone-side));
+}
+
+:root #communication-system-head-menu > #hide-chat-button
+{
+    left: calc(6px + var(--phone-side));
+}
+
+:root #communication-system-head-menu > #local-settings-button
+{
+    right: calc(10px + var(--phone-side));
+}
+
+:root #communication-system-head-menu > #choose-theme-button
+{
+    right: calc(70px + var(--phone-side));
+}
+
+:root #connections-menu
+{
+    right: calc(130px + var(--phone-side));
+}
+
+:root #communication-system-head-menu::after
+{
+    right: calc(2px + var(--phone-side));
+}
+
+:root #head-menu-left-group::after,
+:root:has(#hide-chat-button.chat-hidden) #head-menu-left-group::after
+{
+    right: calc(62px + var(--phone-side));
+}
+
+:root #connections-menu::after
+{
+    right: calc(122px + var(--phone-side));
+}
+
+:root #chat-context-selectors-container
+{
+    left: calc(56px + var(--phone-side));
+    right: calc(12px + var(--phone-side));
+}
+
+:root .channel-list-context-menu:has(.channel-switch-menu-item)
+{
+    left: calc(8px + var(--phone-side)) !important;
+    right: calc(8px + var(--phone-side)) !important;
+}
+
+/* two thin lines mark the sides of the layout when the window is wider than it */
+@media (min-width: 800px)
+{
+    :root #body-container::after
+    {
+        content: "";
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: var(--phone-side);
+        right: var(--phone-side);
+        border-left: 1px solid var(--mono-line);
+        border-right: 1px solid var(--mono-line);
+        pointer-events: none;
+    }
+}
+
+/* The buttons of the top bar take their place at once. The default rules change size and position over 0.3 seconds, which showed them in a wrong shape while the page loaded. */
+:root #communication-system-head-menu > :is(#msgr-me-button, #choose-theme-button, #hide-chat-button, #local-settings-button),
+:root #connections-menu,
+:root #connections-menu-button
+{
+    transition: none;
+}
+
+/* nobody else is connected */
+:root #member-list-body:not(:has(.member-list-client:not(.connected-local-client)))::after
+{
+    content: "Nobody else is connected right now";
+    display: block;
+    padding: 6px 8px;
+    color: var(--mono-muted);
+    font: 14px/20px var(--set-font);
+}
+
+/* A conversation: the line that repeats its name is not shown, and an empty one says so. */
+:root .chat-context > .single-server-message:first-child
+{
+    display: none;
+}
+
+:root .chat-context:not(:has(.single-chat-message))::before
+{
+    content: "No messages here yet";
+    display: block;
+    margin: 38% 24px 0;
+    color: var(--mono-muted);
+    font: 15px/22px var(--set-font);
+    text-align: center;
+}
+
+/* A short message of the page is shown under the top bar, where it covers no window. */
+:root a-toast
+{
+    top: calc(var(--mono-top) + 12px) !important;
+    transform: translateX(-50%) !important;
+}
+
+/* The buttons of the connection details window and of the import identity window have the theme's accent colour. */
+:root :is(#container-2, #identity-string-use-container-enter) :is(.button-1, #add-key-button)
+{
+    border-color: var(--phone-accent);
+    background: var(--phone-accent);
+    color: var(--phone-accent-text);
+}
+
+/* The log is a panel inside the page, above its button. The button closes it again.
+   On a wide window the button stays inside the centred page. */
+:root #textarea-log
+{
+    position: fixed;
+    top: calc(var(--mono-top) + 8px);
+    right: calc(8px + var(--phone-side));
+    bottom: calc(var(--mono-bottom) + 150px);
+    left: calc(8px + var(--phone-side));
+    width: auto;
+    height: auto;
+    padding: 10px;
+    border: 1px solid var(--mono-line);
+    border-radius: 14px;
+    background: var(--mono-bg);
+    color: var(--mono-text);
+    opacity: 1;
+    z-index: 43;
+}
+
+:root #show-hide-log-button
+{
+    right: calc(8px + var(--phone-side));
+}
+
+/* Mono and Simple keep connection actions in Advanced settings, using the same menu and confirmation. */
+:root #member-conversations-connection-settings #connections-menu
+{
+    position: static;
+    display: block !important;
+    width: 100%;
+    height: auto;
+    margin: 8px 0 0;
+}
+
+:root #member-conversations-connection-settings #connections-menu::after
+{
+    content: none;
+}
+
+:root #member-conversations-connection-settings #connections-menu-button
+{
+    position: static;
+    display: block;
+    width: 100%;
+    min-height: 44px;
+    margin: 0;
+    padding: 10px 16px;
+    border: 1px solid var(--mono-line);
+    border-radius: 12px;
+    background: var(--mono-surface);
+    color: var(--mono-text);
+    font: 600 15px/22px var(--set-font);
+    text-align: left;
+}
+
+:root #member-conversations-connection-settings #connections-menu-list
+{
+    position: static;
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 8px;
+}

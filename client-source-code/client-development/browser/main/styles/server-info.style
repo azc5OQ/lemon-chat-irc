@@ -1,0 +1,419 @@
+/* Status panels use the active theme's fonts and colors. */
+:root #current-client-description,
+:root #current-channel-description
+{
+    box-sizing: border-box;
+    padding: 10px;
+    color: var(--set-text, inherit);
+    font: 400 12px/1.4 var(--set-font, sans-serif);
+    font-style: normal;
+    text-align: left;
+    word-break: normal;
+    overflow-wrap: anywhere;
+    overflow-y: auto;
+}
+
+:root #current-client-avatar
+{
+    box-sizing: border-box;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    font-size: 20px;
+    line-height: 40px;
+}
+
+:root .client-profile-header
+{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+:root .client-profile-identity
+{
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+:root #current-client-description .client-profile-identity > p
+{
+    margin: 0;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-shadow: none;
+    text-align: left;
+}
+
+:root #current-client-description-meta
+{
+    opacity: 0.78;
+    font-size: 12px;
+}
+
+:root #current-client-description #current-client-description-client-name
+{
+    margin: 0 0 2px;
+    font-size: 14px;
+    font-family: var(--chat-author-font, var(--set-font, sans-serif));
+    font-weight: var(--chat-author-weight, 600);
+    line-height: 1.4;
+}
+
+:root .client-status-details
+{
+    margin: 8px 0 0;
+    font: inherit;
+}
+
+:root .client-status-details > div,
+:root #root-server-info dl > div
+{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 2px 8px;
+    padding: 4px 0;
+    border-bottom: 1px solid currentColor;
+    border-color: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+:root .client-status-details dt,
+:root #root-server-info dt
+{
+    opacity: 0.78;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+:root .client-status-details dd,
+:root #root-server-info dd
+{
+    min-width: 0;
+    margin: 0;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+:root #root-server-info
+{
+    padding: 0;
+    font: inherit;
+}
+
+:root #current-channel-description .channel-description-text
+{
+    margin-top: 8px;
+    font: inherit;
+    text-align: left;
+}
+
+:root #current-client-description-groups
+{
+    margin: 0;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+}
+
+:root #current-client-description-groups .client-description-group-heading
+{
+    margin: 8px 0 2px;
+    font-size: 12px;
+    font-weight: 500;
+    opacity: 0.78;
+}
+
+:root #current-client-description-groups .client-description-group-entry
+{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 0;
+    margin-right: 0;
+    min-width: 0;
+    max-width: 100%;
+    text-align: left;
+}
+
+:root #current-client-description-groups .client-description-group-entry > span
+{
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+:root .client-description-group-entry img
+{
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+}
+
+:root .client-status-details > [hidden],
+:root .client-info-row[hidden]
+{
+    display: none;
+}
+
+.server-info-summary
+{
+    padding: 8px;
+    box-sizing: border-box;
+    font-style: normal;
+    text-align: left;
+}
+
+#server-settings-general-settings-container
+{
+    font-family: var(--set-font, inherit);
+    font-size: 12px;
+}
+
+#server-settings-server-info dt
+{
+    font-weight: normal;
+}
+
+#server-settings-server-info .server-banner-actions button
+{
+    font: inherit;
+}
+
+.server-info-banner
+{
+    display: block;
+    max-width: 100%;
+    max-height: 256px;
+    height: auto;
+    margin: 0 auto 10px;
+    object-fit: contain;
+}
+
+.server-info-banner[hidden],
+#root-server-info[hidden],
+[data-server-info-field][hidden],
+.context-menu-item[data-action="server-info"][hidden]
+{
+    display: none !important;
+}
+
+.server-info-summary dl,
+#server-info-features
+{
+    margin: 0;
+}
+
+.server-info-summary dl > div,
+#server-info-features > div
+{
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 4px 16px;
+    padding: 5px 0;
+}
+
+.server-info-summary dt,
+#server-info-features dt
+{
+    font-weight: bold;
+}
+
+.server-info-summary dd,
+#server-info-features dd
+{
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.channel-description-text
+{
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#server-info-dialog
+{
+    position: fixed;
+    inset: 0;
+    margin: auto;
+    width: min(400px, calc(100vw - 32px));
+    max-height: calc(100dvh - 40px);
+    box-sizing: border-box;
+    padding: 0;
+    overflow: hidden;
+    color: var(--set-text, #e8e8e8);
+    background: var(--set-panel, #36393f);
+    border: 1px solid var(--set-line, #777);
+    font-family: var(--set-font, inherit);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+#server-info-dialog[open]
+{
+    display: flex;
+    flex-direction: column;
+}
+
+#server-info-dialog::backdrop
+{
+    background: rgb(0 0 0 / 35%);
+}
+
+#server-info-header
+{
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: space-between;
+    box-sizing: border-box;
+    gap: 8px;
+    min-height: 30px;
+    padding: 0 4px 0 10px;
+    cursor: move;
+    user-select: none;
+}
+
+#server-info-header .dialog-title
+{
+    display: block;
+    position: static;
+    inset: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    color: var(--set-text, #e8e8e8);
+    font-family: var(--set-font, inherit);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 30px;
+    letter-spacing: normal;
+    text-align: left;
+}
+
+#server-info-body
+{
+    min-height: 0;
+    padding: 8px 12px 12px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+#server-info-body .server-info-summary
+{
+    padding: 0 0 6px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--set-line-soft, #555);
+}
+
+#server-info-body dl > div
+{
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    gap: 4px 12px;
+    padding: 3px 0;
+}
+
+#server-info-body dt
+{
+    font-weight: 400;
+}
+
+#server-info-body dd
+{
+    text-align: right;
+}
+
+#server-info-dialog .server-info-help,
+#server-info-dialog .server-info-help-label
+{
+    cursor: help;
+}
+
+#server-info-dialog .server-info-help-label
+{
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+}
+
+#server-info-dialog button:not(.close-button),
+.server-banner-actions button
+{
+    color: var(--set-button-text, inherit);
+    background: var(--set-button-bg, #555);
+    border: var(--set-button-border, 1px solid #888);
+    padding: 5px 10px;
+}
+
+.server-banner-actions
+{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin: 8px 0;
+}
+
+#server-banner-status
+{
+    min-height: 1.2em;
+    font-size: 0.9em;
+}
+
+:root #current-client-description-client-name
+{
+    font-family: var(--chat-author-font, var(--set-font, sans-serif));
+}
+
+:root #current-client-description-client-name .client-profile-self-label
+{
+    color: var(--set-muted, inherit);
+    font-size: 0.85em;
+    font-weight: 400;
+    font-style: normal;
+    white-space: nowrap;
+}
+
+
+/* Public keys wrap within the client window instead of determining its width. */
+:root #client-info-enter
+{
+    box-sizing: border-box;
+    width: 560px;
+    min-width: 0;
+    max-width: calc(100vw - 32px);
+}
+
+:root #client-info-content
+{
+    min-width: 0;
+    max-height: calc(100vh - 120px);
+    overflow: auto;
+}
+
+:root #client-info-content .client-info-row,
+:root #client-info-content .client-info-row > span:not(.client-info-label)
+{
+    min-width: 0;
+}
+
+:root #client-info-content .client-info-row > span:not(.client-info-label)
+{
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
+
+:root #client-info-content #client-info-identity
+{
+    text-align: left;
+    user-select: text;
+}

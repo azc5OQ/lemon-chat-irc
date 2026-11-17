@@ -1,0 +1,9 @@
+{
+    "port": 19167,
+    "target":
+    {
+        "host": "irc.libera.chat",
+        "port": 6697,
+        "tls": true
+    }
+}

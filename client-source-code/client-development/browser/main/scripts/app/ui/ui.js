@@ -1,0 +1,5511 @@
+// provides page controls, themes, menus and dialogs
+
+// state private to this file
+var custom_key_count = 0; // connection password fields are added on demand. empty means no metadata keys
+
+var pending_identity_file = null; // validated file contents, applied only after confirmation
+var identity_file_read_generation = 0; // ignores callbacks from a replaced or dismissed file selection
+
+var is_server_settings_tab_visible = false;
+
+var member_list_observer = null;
+
+var member_list_sync_scheduled = false;
+
+
+var settings_delete_delegation_wired = false;
+
+var channel_touch_rows = new WeakSet();
+
+var channel_touch_cancel = null;
+
+var group_icon_picker_target_group_id = null; // group whose icon the currently open picker will change
+
+var channel_icon_picker_target_channel_id = null; // channel whose icon the currently open picker will change (the icon picker is shared between groups and channels)
+
+var UI = {
+
+    /**
+     * @brief places the theme list against its button, including in a moved toolbar
+     *
+     * @return void
+     */
+    position_theme_menu: function()
+    {
+        let button = document.getElementById("choose-theme-button");
+        let menu = document.getElementById("choose-theme-button-list");
+        if (!menu.classList.contains("theme-menu-open"))
+        {
+            return;
+        }
+        let button_box = button.getBoundingClientRect();
+        let below = window.innerHeight - button_box.bottom - 8;
+        let above = button_box.top - 8;
+        let upwards = below < Math.min(menu.scrollHeight, 320) && above > below;
+        menu.style.setProperty("--theme-menu-height", Math.max(44, upwards ? above : below) + "px");
+        let left = Math.max(8, Math.min(button_box.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8));
+        let top = upwards ? button_box.top - menu.offsetHeight : button_box.bottom;
+        menu.style.setProperty("--theme-menu-left", left + "px");
+        menu.style.setProperty("--theme-menu-top", Math.max(8, top) + "px");
+    },
+
+    /**
+     * @brief closes and unpins the theme list and clears the button expanded state
+     *
+     * @return void
+     */
+    close_theme_menu: function()
+    {
+        let menu = document.getElementById("choose-theme-button-list");
+        menu.classList.remove("theme-menu-open");
+        delete menu.dataset.pinned;
+        document.getElementById("choose-theme-button").setAttribute("aria-expanded", "false");
+    },
+
+    /**
+     * @brief updates the theme list position when it opens or the window changes size
+     *
+     * @return void
+     */
+    setup_theme_menu_positioning: function()
+    {
+        let button = document.getElementById("choose-theme-button");
+        let menu = document.getElementById("choose-theme-button-list");
+        let close_timer = null;
+        // filtered or transformed toolbars affect fixed positioning
+        document.body.append(menu);
+        menu.dataset.positioned = "true";
+        button.setAttribute("aria-controls", menu.id);
+        button.setAttribute("aria-expanded", "false");
+        /**
+         * @brief cancels delayed closing and positions the open theme list
+         *
+         * @return void
+         */
+        function open()
+        {
+            clearTimeout(close_timer);
+            menu.classList.add("theme-menu-open");
+            button.setAttribute("aria-expanded", "true");
+            UI.position_theme_menu();
+        }
+        /**
+         * @brief closes the theme list after a short delay unless it is pinned, hovered or focused
+         *
+         * @return void
+         */
+        function leave()
+        {
+            clearTimeout(close_timer);
+            close_timer = setTimeout(function()
+            {
+                if (!menu.dataset.pinned && !menu.matches(":hover") && !button.matches(":hover") && !menu.contains(document.activeElement) && document.activeElement !== button)
+                {
+                    UI.close_theme_menu();
+                }
+            }, 250);
+        }
+        button.addEventListener("mouseenter", open);
+        button.addEventListener("mouseleave", leave);
+        menu.addEventListener("mouseenter", open);
+        menu.addEventListener("mouseleave", leave);
+        button.addEventListener("click", function(event)
+        {
+            event.stopPropagation();
+            if (menu.dataset.pinned)
+            {
+                UI.close_theme_menu();
+            }
+            else
+            {
+                menu.dataset.pinned = "true";
+                open();
+            }
+        });
+        button.addEventListener("keydown", function(event)
+        {
+            if (event.key === "ArrowDown")
+            {
+                event.preventDefault();
+                open();
+                let first_visible_item = Array.from(menu.querySelectorAll(".choose-theme-item")).find(function(item)
+                {
+                    return item.getClientRects().length > 0;
+                });
+                if (first_visible_item)
+                {
+                    first_visible_item.focus();
+                }
+            }
+        });
+        document.addEventListener("pointerdown", function(event)
+        {
+            if (!menu.contains(event.target) && event.target !== button)
+            {
+                UI.close_theme_menu();
+            }
+        });
+        document.addEventListener("keydown", function(event)
+        {
+            if (event.key === "Escape" && menu.classList.contains("theme-menu-open"))
+            {
+                UI.close_theme_menu();
+                button.focus();
+            }
+        });
+        menu.addEventListener("focusout", leave);
+        button.addEventListener("blur", leave);
+        window.addEventListener("resize", UI.position_theme_menu);
+    },
+
+    /**
+     * @brief shows one local settings section without changing its controls
+     *
+     * @param HTMLButtonElement selected_tab -> tab to open
+     *
+     * @return void
+     */
+    select_local_settings_tab: function(selected_tab)
+    {
+        let tabs = document.querySelectorAll("#local-settings-tabs [role='tab']");
+        let tab = null;
+        let selected = false;
+
+        for (tab of tabs)
+        {
+            selected = tab === selected_tab;
+            tab.setAttribute("aria-selected", String(selected));
+            tab.tabIndex = selected ? 0 : -1;
+            document.getElementById(tab.getAttribute("aria-controls")).hidden = !selected;
+        }
+        document.getElementById("local-settings-scroll").scrollTop = 0;
+
+        // update the list
+        document.getElementById("local-settings-section-select").value = selected_tab.id;
+    },
+
+    /**
+     * @brief lets the local settings tabs open with a click or the arrow keys
+     *
+     * @return void
+     */
+    setup_local_settings_tabs: function()
+    {
+        let tab_list = document.getElementById("local-settings-tabs");
+
+        // choose from the list
+        document.getElementById("local-settings-section-select").onchange = function(event)
+        {
+            UI.select_local_settings_tab(document.getElementById(event.currentTarget.value));
+        };
+
+        tab_list.onclick = function(event)
+        {
+            let tab = event.target.closest("[role='tab']");
+
+            if (tab != null && tab_list.contains(tab))
+            {
+                UI.select_local_settings_tab(tab);
+            }
+        };
+        tab_list.onkeydown = function(event)
+        {
+            let tabs = Array.from(tab_list.querySelectorAll("[role='tab']"));
+            let index = tabs.indexOf(event.target);
+
+            if (index < 0 || !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+            {
+                return;
+            }
+            event.preventDefault();
+            if (event.key === "Home")
+            {
+                index = 0;
+            }
+            else if (event.key === "End")
+            {
+                index = tabs.length - 1;
+            }
+            else
+            {
+                index = (index + (["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 1) + tabs.length) % tabs.length;
+            }
+            UI.select_local_settings_tab(tabs[index]);
+            tabs[index].focus();
+        };
+    },
+
+    /**
+     * @brief saves local chat scale and inline picture limits
+     *
+     * @return void
+     */
+    setup_chat_display_settings: function()
+    {
+        let scale = document.getElementById("local-settings-chat-scale");
+        let width = document.getElementById("local-settings-image-max-width");
+        let height = document.getElementById("local-settings-image-max-height");
+        let controls = [
+            [scale, "lemon_chat_display_scale", 100],
+            [width, "lemon_chat_image_max_width", 600],
+            [height, "lemon_chat_image_max_height", 480]
+        ];
+
+        /**
+         * @brief rounds a setting and clamps it to the input limits
+         *
+         * @param HTMLInputElement input -> control providing minimum and maximum values
+         * @param number|string|null value -> candidate value
+         * @param number fallback -> value used when the candidate is empty or not finite
+         *
+         * @return number -> rounded value inside the control limits
+         */
+        function bounded_value(input, value, fallback)
+        {
+            let number = Number(value);
+            if (value == null || value === "" || !Number.isFinite(number))
+            {
+                number = fallback;
+            }
+            return Math.max(Number(input.min), Math.min(Number(input.max), Math.round(number)));
+        }
+
+        /**
+         * @brief applies chat and image sizes while preserving the bottom position or scroll fraction
+         *
+         * @return void
+         */
+        function apply()
+        {
+            let chat = document.getElementById("chat-context-container");
+            let scroll_range = Math.max(0, chat.scrollHeight - chat.clientHeight);
+            let at_bottom = scroll_range - chat.scrollTop < 4;
+            let scroll_fraction = scroll_range > 0 ? chat.scrollTop / scroll_range : 0;
+            let style = document.documentElement.style;
+            style.setProperty("--chat-display-scale", Number(scale.value) / 100);
+            style.setProperty("--chat-image-max-width", bounded_value(width, width.value, 600) + "px");
+            style.setProperty("--chat-image-max-height", bounded_value(height, height.value, 480) + "px");
+            document.getElementById("local-settings-chat-scale-value").value = scale.value + "%";
+            scale.setAttribute("aria-valuetext", scale.value + "%");
+            let next_scroll_range = Math.max(0, chat.scrollHeight - chat.clientHeight);
+            chat.scrollTop = at_bottom ? next_scroll_range : scroll_fraction * next_scroll_range;
+        }
+
+        for (let [input, key, fallback] of controls)
+        {
+            input.value = bounded_value(input, utils__storage_get(key), fallback);
+            input.addEventListener("input", function()
+            {
+                if (input.value !== "" && input.validity.valid)
+                {
+                    utils__storage_set(key, input.value);
+                    apply();
+                }
+            });
+            input.addEventListener("change", function()
+            {
+                input.value = bounded_value(input, input.value, fallback);
+                utils__storage_set(key, input.value);
+                apply();
+            });
+        }
+        document.getElementById("local-settings-chat-scale-reset").addEventListener("click", function()
+        {
+            scale.value = 100;
+            utils__storage_set("lemon_chat_display_scale", "100");
+            apply();
+        });
+        apply();
+    },
+
+    /**
+     * @brief closes context menus while allowing pending group menu clicks to finish
+     *
+     * @param boolean setbackgroundColor -> true also clears the row highlights
+     * @param boolean handle_group_contextmenu_click -> false skips checking for a pending group menu click
+     *
+     * @return void
+     */
+    delete_contextmenus: function(setbackgroundColor = false, handle_group_contextmenu_click = true)
+    {
+        let elements_count1 = document.getElementsByClassName("channel-list-context-menu").length;
+        for (let i = 0; i < elements_count1; i++)
+        {
+            document.getElementsByClassName("channel-list-context-menu")[0].remove();
+        }
+
+        let elements_count2 = document.getElementsByClassName("add-group-context-menu").length;
+        for (let i = 0; i < elements_count2; i++)
+        {
+            document.getElementsByClassName("add-group-context-menu")[0].remove();
+        }
+
+        let elements_count3 = document.getElementsByClassName("chat-input-container-context-menu").length;
+        for (let i = 0; i < elements_count3; i++)
+        {
+            document.getElementsByClassName("chat-input-container-context-menu")[0].remove();
+        }
+
+        if (setbackgroundColor == true)
+        {
+            let elements = document.getElementsByClassName('single-channel');
+            for (let i = 0; i < elements.length; i++)
+            {
+                elements[i].style.backgroundColor = "";
+            }
+
+            let elements1 = document.getElementsByClassName('connected-client');
+            for (let i = 0; i < elements1.length; i++)
+            {
+                elements1[i].style.backgroundColor = "";
+            }
+        }
+    },
+
+    /**
+     * @brief closes message menus and clears local message hover states
+     *
+     * @return void
+     */
+    delete_chat_message_contextmenu: function()
+    {
+        // delete chat message contextmenus
+        let elements_count = document.getElementsByClassName("chat-message-context-menu").length;
+
+        for (let i = 0; i < elements_count; i++)
+        {
+            document.getElementsByClassName("chat-message-context-menu")[0].remove();
+        }
+
+        let elements_count1 = document.getElementsByClassName("local-single-chat-message-content-p").length;
+
+        for (let i = 0; i < elements_count1; i++)
+        {
+            document.getElementsByClassName("local-single-chat-message-content-p")[i].classList.remove("single-chat-message-content-p-hover");
+        }
+    },
+
+    /**
+     * @brief toggles a channel's collapsed state and updates descendant rows
+     *
+     * @param object e -> the mouse event
+     *
+     * @return void
+     */
+    collapse_expand_channel: function(e)
+    {
+        event.stopPropagation();
+
+        UI.delete_contextmenus(true);
+
+        if (event.which != 1)
+        {
+            return;
+        }
+
+        let element = e.target.parentNode;
+
+        let channel_id = parseInt(element.getAttribute("data-channel-id"));
+
+        if (e.target.classList.contains("single-channel-expand-button"))
+        {
+            e.target.classList.remove("single-channel-expand-button");
+
+            let index = channel_tree__get_channel_index_in_array_by_channel_id(g_channel_list, channel_id);
+            g_channel_list[index].is_channel_directly_collapsed = false;
+
+            let client_ids = [];
+            let channel_ids = [];
+
+            channel_ids = channel_tree__find_subchannels_of_channel_to_expand(channel_id);
+
+            console.log(channel_ids);
+
+            for (let i = 0; i < channel_ids.length; i++)
+            {
+                document.querySelector('[data-channel-id="' + channel_ids[i] + '"]').classList.remove("collapsed");
+            }
+
+            channel_ids.push(channel_id);
+
+            client_ids = channel_tree__find_clients_in_channel(channel_ids);
+
+            for (let i = 0; i < client_ids.length; i++)
+            {
+                document.querySelector('[data-connected-client-id="' + client_ids[i] + '"]').classList.remove("collapsed");
+            }
+        }
+        else
+        {
+            e.target.classList.add("single-channel-expand-button");
+
+            let index = channel_tree__get_channel_index_in_array_by_channel_id(g_channel_list, channel_id);
+            g_channel_list[index].is_channel_directly_collapsed = true;
+
+            let client_ids = [];
+            let channel_ids = [];
+
+            channel_ids = channel_tree__find_subchannels_of_channel_for_collapse(channel_id);
+
+            for (let i = 0; i < channel_ids.length; i++)
+            {
+                document.querySelector('[data-channel-id="' + channel_ids[i] + '"]').classList.add("collapsed");
+            }
+
+            channel_ids.push(channel_id); // so clients in current channel are also hidden
+
+            for (let i = 0; i < channel_ids.length; i++)
+            {
+                let channel_index = channel_tree__get_channel_index_in_array_by_channel_id(g_channel_list, channel_ids[i]);
+            }
+
+            client_ids = channel_tree__find_clients_in_channel(channel_ids);
+
+            for (let i = 0; i < client_ids.length; i++)
+            {
+                document.querySelector('[data-connected-client-id="' + client_ids[i] + '"]').classList.add("collapsed");
+            }
+        }
+    },
+
+    /**
+     * @brief clears context menus and row highlights on a channel click
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    single_channel_onclick: function(event)
+    {
+        event.stopPropagation();
+        UI.delete_contextmenus(true);
+    },
+
+    /**
+     * @brief joins a different channel, requesting its password when needed
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    single_channel_doubleclick_join: function(event)
+    {
+        event.stopPropagation();
+        if (G_HAS_DOM == false)
+        {
+            return;
+        }
+
+        let channel_node = event.target.closest(".single-channel");
+        UI.delete_contextmenus(true);
+        if (channel_node)
+        {
+            moderation__join_channel(Number(channel_node.dataset.channelId));
+        }
+    },
+
+    /**
+     * @brief opens the clicked conversation tab and clears its unread count
+     * this is the selected tab
+     *
+     * @return void
+     */
+    chat_context_selector_onclick: function()
+    {
+        let id_to_find = "";
+        let client_id = "";
+        let channel_id = "";
+        let selector_type = this.getAttribute("data-chat-context-selector-type");
+
+        for (let i = 0; i < document.getElementsByClassName("chat-context-selector").length; i++)
+        {
+            document.getElementsByClassName("chat-context-selector")[i].style.backgroundColor = "";
+        }
+
+        let elements1 = document.getElementsByClassName('connected-client');
+        for (let i = 0; i < elements1.length; i++)
+        {
+            elements1[i].style.backgroundColor = "";
+        }
+
+        this.style.backgroundColor = "#36393f";
+
+        for (let i = 0; i < document.getElementsByClassName("chat-context").length; i++)
+        {
+            document.getElementsByClassName("chat-context")[i].style.display = "none";
+        }
+
+        const selected_id = this.getAttribute("data-chat-context-selector-id") || "";
+        if (selector_type === "user" && selected_id.startsWith("offline-"))
+        {
+            id_to_find = "chat-context-" + selected_id;
+            const context_index = chat__get_chat_context_index_by_chat_context_id(id_to_find);
+            const element = document.getElementById(id_to_find);
+            if (context_index < 0 || element == null)
+            {
+                return;
+            }
+            const context = g_chat_context_array[context_index];
+            const identity_hash = context.peer_identity_hash || (context.peer_public_key ? "" : selected_id.slice("offline-".length));
+            const contact = g_offline_client_list.find(function(candidate)
+            {
+                return identity_hash && candidate.identity_hash === identity_hash && (!context.peer_public_key || candidate.public_key === context.peer_public_key);
+            });
+            element.style.display = "block";
+            chat_files__cancel_pending_read();
+            g_current_chat_context_id = id_to_find;
+            chat_replies__refresh();
+            g_chat_message_receiver_type = "user";
+            g_chat_message_receiver_id = -1;
+            g_offline_chat_recipient_identity_hash = contact ? identity_hash : "";
+            if (contact && contact.public_key)
+            {
+                context.peer_public_key = contact.public_key;
+                context.peer_identity_hash = identity_hash;
+                UI.enable_inputs();
+            }
+            else
+            {
+                // history remains readable without inventing a live or saved recipient
+                UI.disable_inputs();
+            }
+            const peer = {identity_hash: identity_hash, public_key: context.peer_public_key || ""};
+            chat__send_read_command(chat__peer_state_key(peer), peer);
+        }
+        else if (selector_type == "user")
+        {
+            UI.enable_inputs();
+            id_to_find = "chat-context-pm-";
+            client_id = this.getAttribute("data-chat-context-selector-id").split("user-")[1];
+            id_to_find += client_id;
+
+            document.getElementById(id_to_find).style.display = "block";
+
+            // opening the conversation clears unread state even when its badge is not rendered
+            chat__clear_unread_count(client_id);
+            chat__render_unread_badge(client_id, false);
+
+            chat_files__cancel_pending_read();
+
+            g_current_chat_context_id = id_to_find;
+            chat_replies__refresh();
+            console.log("current_chat_context_id -> ", g_current_chat_context_id);
+
+            g_chat_message_receiver_type = "user"; // from local user perspective
+            g_chat_message_receiver_id = client_id; // from local user perspective
+            g_offline_chat_recipient_identity_hash = "";
+        }
+        else if (selector_type == "channel")
+        {
+            id_to_find = "chat-context-channel-";
+            channel_id = this.getAttribute("data-chat-context-selector-id").split("channel-")[1];
+            id_to_find += channel_id;
+
+            console.log("trying to find id - > ", id_to_find);
+            g_chat_message_receiver_type = "channel";
+            g_offline_chat_recipient_identity_hash = ""; /* back on a channel: no offline target */ // from local user perspective
+
+            let is_found = document.getElementById(id_to_find);
+            if (is_found)
+            {
+                document.getElementById(id_to_find).style.display = "block";
+            }
+
+            chat_files__cancel_pending_read();
+            g_current_chat_context_id = id_to_find;
+            chat_replies__refresh();
+
+            if (g_current_channel_id == channel_id)
+            {
+                UI.enable_inputs();
+                console.log("changed current_chat_context_id to -> " + id_to_find);
+            }
+            else
+            {
+                UI.disable_inputs();
+            }
+        }
+
+        // mark the selected conversation with a ring in the member list
+        groups__refresh_channel_controls();
+        UI.schedule_member_list_sync();
+
+        chat__scroll_chat_to_end(true);
+    },
+
+    /**
+     * @brief enables message input, attachments and text styling controls
+     *
+     * @return void
+     */
+    enable_inputs: function()
+    {
+        console.log("function enable inputs()");
+        utils__hide_custom_alert("", "channel-context");
+        document.getElementById("chat-input-container-text-input").disabled = false;
+        document.getElementById("chat-input-container-send-chat-input").disabled = false;
+        document.getElementById("chat-input-container-send-chat-input").title = "";
+        document.getElementById("choose_image_input").disabled = false;
+        document.getElementById("choose-file-input").disabled = false;
+        document.getElementById("color-picker-selector-div").style.display = "block";
+        document.getElementById("chat-input-font-size-range").style.display = "block";
+        groups__refresh_channel_controls();
+    },
+
+    /**
+     * @brief disables message input, attachments and text styling controls
+     *
+     * @return void
+     */
+    disable_inputs: function()
+    {
+        console.log("function disable_inputs()");
+        document.getElementById("chat-input-container-text-input").disabled = true;
+        document.getElementById("chat-input-container-send-chat-input").disabled = true;
+        document.getElementById("chat-input-container-send-chat-input").title = CHANNEL_CONTEXT_SEND_WARNING;
+        document.getElementById("choose_image_input").disabled = true;
+        document.getElementById("choose-file-input").disabled = true;
+        document.getElementById("color-picker-selector-div").style.display = "none";
+        document.getElementById("chat-input-font-size-range").style.display = "none";
+        utils__custom_alert(CHANNEL_CONTEXT_SEND_WARNING, "channel-context");
+    },
+
+
+    /**
+     * @brief handles microphone toggling and touch controls using the current voice mode
+     *
+     * @param object event -> the click or touch event
+     *
+     * @return void
+     */
+    toggle_microphone_onclick: function(event)
+    {
+        // so workers ignore this function
+        if (G_HAS_DOM == false)
+        {
+            return;
+        }
+
+        // handle desktop clicks and touch activation
+        if (event.currentTarget.checked || (g_is_microphone_enabled_on_touch_device == false && g_is_client_running_under_touch_device == true))
+        {
+            voice__activate_microphone();
+
+            // continuous mode starts immediately. push to talk waits for the key
+            if (g_is_continuous_mic_mode == true && g_is_client_running_under_touch_device == false)
+            {
+                g_is_continuous_transmission_active = true;
+                voice__process_start_sending_audio();
+            }
+        }
+        else if (event.currentTarget.checked == false && g_is_client_running_under_touch_device == false)
+        {
+            // continuous mode was transmitting: stop before the mic goes away
+            if (g_is_continuous_transmission_active == true)
+            {
+                g_is_continuous_transmission_active = false;
+                voice__process_stop_sending_audio();
+            }
+
+            document.getElementById("custom-file-upload-button-song").style.visibility = "hidden";
+            document.getElementById("stop-song").style.display = "none";
+
+            let message_object = {
+                message: {
+                    type: "microphone_usage",
+                    value: 3,
+                }
+            };
+
+            let message_json_string = connection__process_message_before_sending(message_object);
+            let data = keys__encrypt_all_message_data_and_convert_to_base64(message_json_string);
+
+            connection__websocket_worker_send(data);
+            g_last_sent_value_microphone_usage = 2;
+
+            if (g_is_microphone_enabled)
+            {
+                sounds__play("microphone_muted");
+            }
+            g_is_microphone_enabled = false;
+
+            if (g_local_audio_stream != null)
+            {
+                if (g_local_audio_stream.getTracks() != null)
+                {
+                    g_local_audio_stream.getTracks().forEach(function (track)
+                    {
+                        track.stop();
+                    });
+                }
+            }
+
+            document.getElementById("toggle-microphone-label").style.backgroundImage = "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAELklEQVRoQ+2ZWehOXRTGf+hDuJIpmVKUJIUiY9wRMpRMFy58hogoZUgk04WUqQyJEqJMZSgy9hlKXBK5+MgsuVDm0KN9tJ3/Gfbe55z3f2PdvO85Z++1n2fvtddae+0GlC/DgOmAftsDDYHnwDVgL3C9zCEblKisFbAPGJ2j8xTwL/CmjLHLItAFuAh0dQT1PzAc0G8hKYNAC+AG0MsTyX2gH/DBs98fzcsgsA5YHghiPbAisO+vbkUJNAdeAfoNkRdAB+B7QufWwDjgYNYqFSUwFtCmDBGZjjb85YTObc37HuZX7RJNrSiBZYDMwFdcwUd6RTKRRFECm4FFnuh9wUfqZwF74mMVJbAFWOBBIBS8PJYCY53YUUsCAj8GuJRAuI153zPh2wMTM7Th60itCFQCvgw36mJClYGvBYFKwVdNoHLwVRKoCfiqCNQMvCuBf4AdQB9gFXDG8mXxTRzq5+8BI0xepYi7GrgLzAO+ZsUZFzc6BThklCiQyGdHYhMIBS8/ryClpFCiMXQ4kkwFDhcloEgroJHYpCMCoWYjnVuBhZb+H9Z/vdf3VHFZgTwCMwMjbASqXglsBM4HpAf2jFZOYDaw0xpRm/qbeW6Wkqfb+XyWBejbJmCJadQY+Gx1mBsbu44uFxPSqeiE1VPgXmeg8gEvNQIvEpKOwBNL90TgeNE90B+4ZSmRx1CNJ0l8wUuH3Gd0KhsA3LQUDwH+K0qgpZnxRsZcpFQ+Oi4h4LWSOhNHvn4psMEo1jm5XV79yMWEpE8z3tfxDJtn8/Z3ebht1gtV7Qaa5zum7JKpz5WAIqKiZd4B3Af8BWCU5RAEXOYSYXIqubgSSAMWYjbSpUKYUoZ3RrFwaJUHm+cvQLfYhk7EUIRACHgBk8momGW7SxXGVCCLZBcwx2U5QwlkgdcBfD8wCOgMKDV4amb4KPA4BkyuUu9VxZa8BXoDz6oiEHwATwCkUsl2QMFRIrLjfYplviuQNfPxrDJrArUySkMmxxqtBVa6zHzUxodAns3LvmUKB4ArgJ5tUZqgIDgBmAE0jX3XWWOND3i1dSWQBz4+rgLTQxMAZR4yu04JoNXvI7A4L+dJI+ZCIG/D6pJipO/MmfYqcilZfBTYP3cF8sDrlkUnqaHAfEDV6iY5YOQ+laDtBq6ajRuKP5OAK3h7cN0TyM7lBuXHZTYSuU7l/UoPlEe9D0Yc65hmQrpc0OyoPh8X+flo5rNwnLVM65xJG8rC/VtPGgHdImqJQ8GrX70S0EnrtJnpiITrzEft65WAQNgkksDLZ0+yomh8tZTLS4dEVYuXKfYjl3vE1Jy8TSzPjQrANOBk7GCh69Hb3qNld5BObXIvySOQpkwX20odFF3LEEXt7gmJXq7uUAJSHKUF8ZQgd9BYg0/AsYxzdqa+IgR8gVbS/i+BSqbVQ+lPvaMNQOE4cEcAAAAASUVORK5CYII=)";
+        }
+        else if (g_is_microphone_enabled_on_touch_device == true && g_is_client_running_under_touch_device == true && event.type == "touchstart")
+        {
+            // audio is not available, so say so rather than looking broken
+            if (g_is_microphone_available == false)
+            {
+                utils__custom_alert("the voice connection is not established, so the microphone cannot be used yet");
+                return;
+            }
+
+            let ptt_button = document.getElementById("microphone-push-to-talk-button-touch-device");
+
+            // each tap toggles continuous transmission
+            if (g_is_continuous_mic_mode == true)
+            {
+                if (g_is_continuous_transmission_active == true)
+                {
+                    g_is_continuous_transmission_active = false;
+                    ptt_button.classList.remove("mic-continuous-active");
+                    voice__process_stop_sending_audio();
+                }
+                else
+                {
+                    g_is_continuous_transmission_active = true;
+                    ptt_button.classList.add("mic-continuous-active");
+                    voice__process_start_sending_audio();
+                }
+
+                return;
+            }
+
+            ptt_button.classList.add("ptt-pressed");
+            voice__process_start_sending_audio();
+        }
+        else if (g_is_microphone_enabled_on_touch_device == true && g_is_client_running_under_touch_device == true && event.type == "touchend")
+        {
+            // in continuous mode the toggle already happened on touchstart
+            if (g_is_continuous_mic_mode == true)
+            {
+                return;
+            }
+
+            document.getElementById("microphone-push-to-talk-button-touch-device").classList.remove("ptt-pressed");
+            voice__process_stop_sending_audio();
+        }
+    },
+
+    /**
+     * @brief removes a chat's image observers and reaction controls before removing its messages
+     *
+     * @param Element context -> chat panel being closed
+     */
+    chat_context_remove: function(context)
+    {
+        if (!context)
+        {
+            return;
+        }
+        server_emojis__forget_images(context);
+        for (let message of context.querySelectorAll(".chat-reaction-message"))
+        {
+            chat_reactions__forget(message);
+        }
+        chat_replies.pending.delete(context);
+        context.remove();
+    },
+
+    /**
+     * @brief closes a chat tab and returns to the current channel's chat
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    chat_context_remove_onclick: function(event)
+    {
+        if (G_HAS_DOM == false)
+        {
+            return;
+        }
+        event.stopPropagation();
+
+        let selector_type = event.srcElement.getAttribute("data-chat-context-remove-selector-type");
+
+        if (selector_type == "user")
+        {
+            let selector_id = this.getAttribute("data-chat-context-remove-selector-id");
+            let client_id = selector_id.split("user-")[1];
+            const context_id = selector_id.startsWith("offline-") ? "chat-context-" + selector_id : "chat-context-pm-" + client_id;
+
+            // notify the peer that this conversation was closed
+            if (!selector_id.startsWith("offline-"))
+            {
+                chat__send_direct_chat_closed_notice(parseInt(client_id));
+            }
+            document.querySelector('[data-chat-context-selector-id="' + selector_id + '"]').remove();
+            UI.chat_context_remove(document.getElementById(context_id));
+
+            let chat_context_index_to_remove = chat__get_chat_context_index_by_chat_context_id(context_id);
+
+            if (chat_context_index_to_remove != -1)
+            {
+                g_chat_context_array.splice(chat_context_index_to_remove, 1);
+            }
+
+            document.getElementById("chat-context-channel-" + g_current_channel_id).style.display = "block";
+            chat_files__cancel_pending_read();
+            g_current_chat_context_id = "chat-context-channel-" + g_current_channel_id;
+            chat_replies__refresh();
+            chat__clear_channel_unread_count(g_current_channel_id); // opened it, so it is read
+            g_chat_message_receiver_type = "channel";
+            g_offline_chat_recipient_identity_hash = ""; // back on a channel: no offline target
+            UI.enable_inputs();
+            UI.schedule_member_list_sync(); // active ring moves back to the channel circle
+
+            for (let i = 0; i < document.getElementsByClassName("chat-context-selector").length; i++)
+            {
+                document.getElementsByClassName("chat-context-selector")[i].style.backgroundColor = "";
+            }
+
+            let elements1 = document.getElementsByClassName('connected-client');
+            for (let i = 0; i < elements1.length; i++)
+            {
+                elements1[i].style.backgroundColor = "";
+            }
+
+            document.querySelector('[data-chat-context-selector-id="channel-' + g_current_channel_id + '"]').style.backgroundColor = "#36393f";
+        }
+        else if (selector_type == "channel")
+        {
+            // cannot remove current channel
+
+            let selector_id = this.getAttribute("data-chat-context-remove-selector-id");
+            let channel_id = selector_id.split("channel-")[1];
+
+            console.log("current_channel_id " + g_current_channel_id);
+            console.log("channel_id " + channel_id);
+
+            if (parseInt(g_current_channel_id) == parseInt(channel_id))
+            {
+                utils__custom_alert("current channel, can't remove");
+                return;
+            }
+
+            document.querySelector('[data-chat-context-selector-id="' + selector_id + '"]').remove();
+            UI.chat_context_remove(document.getElementById("chat-context-channel-" + channel_id));
+
+            let chat_context_index_to_remove = chat__get_chat_context_index_by_chat_context_id("chat-context-channel-" + channel_id);
+
+            if (chat_context_index_to_remove != -1)
+            {
+                g_chat_context_array.splice(chat_context_index_to_remove, 1);
+            }
+
+            document.getElementById("chat-context-channel-" + g_current_channel_id).style.display = "block";
+            chat_files__cancel_pending_read();
+            g_current_chat_context_id = "chat-context-channel-" + g_current_channel_id;
+            chat_replies__refresh();
+        chat__clear_channel_unread_count(g_current_channel_id); // opened it, so it is read
+            document.querySelector('[data-chat-context-selector-id="channel-' + g_current_channel_id + '"]').style.backgroundColor = "#36393f";
+
+            g_chat_message_receiver_type = "channel";
+            g_offline_chat_recipient_identity_hash = "";
+            UI.enable_inputs();
+            UI.schedule_member_list_sync(); // active ring moves back to the channel circle
+        }
+
+        // hide the previous conversation when returning to the joined channel
+        for (let context of document.getElementsByClassName("chat-context"))
+        {
+            context.style.display = context.id === g_current_chat_context_id ? "block" : "none";
+        }
+    },
+
+    /**
+     * @brief opens a private chat or the selected user context menu
+     *
+     * @param object event -> the mouse event, or a synthetic one for a touch
+     * @param boolean|null is_touch_event -> true when called for a touch
+     * @param number|null touch_clientX -> the touch position
+     * @param number|null touch_clientY -> the touch position
+     * @param Element|null touch_current_target -> the row, when the event has no currentTarget
+     * @param boolean is_short_click -> true for a tap that opens the chat rather than the menu
+     *
+     * @return void
+     */
+    connected_user_onmousedown: function(event, is_touch_event = null, touch_clientX = null, touch_clientY = null, touch_current_target = null, is_short_click = false)
+    {
+        // handles rows created by connection and client list updates
+
+        if (event && typeof event.stopPropagation === "function")
+        {
+            event.stopPropagation();
+        }
+
+        console.log(event.which);
+
+        let clientX = 0;
+        let clientY = 0;
+        let currentTarget = null;
+        let is_this_idle_client = false;
+        let is_this_music_bot_client = false;
+
+        if (event.currentTarget == null)
+        {
+            currentTarget = touch_current_target;
+        }
+        else
+        {
+            currentTarget = event.currentTarget;
+        }
+
+        if (is_touch_event == null)
+        {
+            clientX = event.clientX;
+            clientY = event.clientY;
+        }
+        else
+        {
+            clientX = touch_clientX;
+            clientY = touch_clientY;
+        }
+
+        if (currentTarget.classList.contains("idle-client"))
+        {
+            is_this_idle_client = true;
+        }
+
+        if (currentTarget.classList.contains("music-bot-client"))
+        {
+            is_this_music_bot_client = true;
+        }
+
+        // bots allow management menus but cannot become message recipients
+        if (is_this_music_bot_client && (event.which == 1 || is_touch_event == true && is_short_click == true))
+        {
+            return;
+        }
+
+        if (event.which == 1 || is_touch_event == true && is_short_click == true)
+        {
+            UI.activate_connected_user(currentTarget, is_this_music_bot_client);
+        }
+        else if (event.which == 3 || is_touch_event == true && is_short_click == false)
+        {
+            UI.show_connected_user_menu(currentTarget, clientX, clientY, is_this_idle_client, is_this_music_bot_client);
+        }
+    },
+
+    /**
+     * @brief activates a user row and displays its profile
+     *
+     * @param Element currentTarget -> selected user row
+     * @param boolean is_this_music_bot_client -> whether the row represents a music bot
+     *
+     * @return void
+     */
+    activate_connected_user: function(currentTarget, is_this_music_bot_client)
+    {
+        UI.delete_contextmenus();
+        // remove color highlight from other clients
+
+        document.getElementById("current-channel-description").innerHTML = "";
+        for (let i = 0; i < document.getElementsByClassName('connected-client').length; i++)
+        {
+            document.getElementsByClassName('connected-client')[i].style.backgroundColor = "";
+        }
+
+
+        g_chat_message_receiver_id = currentTarget.getAttribute("data-connected-client-id");
+
+        if (g_chat_message_receiver_id != g_local_client_id && is_this_music_bot_client == false)
+        {
+            // select a private conversation only for another person
+
+            for (let i = 0; i < document.getElementsByClassName("chat-context-selector").length; i++)
+            {
+                document.getElementsByClassName("chat-context-selector")[i].style.backgroundColor = "";
+            }
+
+            g_chat_message_receiver_type = "user";
+
+            let data_username = channel_tree__get_display_name_by_client_id(g_chat_message_receiver_id);
+            let id_to_find = "chat-context-pm-" + g_chat_message_receiver_id;
+            chat_files__cancel_pending_read();
+            g_current_chat_context_id = id_to_find;
+            chat_replies__refresh();
+            g_offline_chat_recipient_identity_hash = ""; // this person is connected: normal direct path
+            UI.schedule_member_list_sync(); // ring the opened chat's circle in the strip
+            let is_found = document.getElementById(id_to_find);
+
+            if (is_found == null)
+            {
+                // make all elements invisible
+                for (let i = 0; i < document.getElementsByClassName("chat-context").length; i++)
+                {
+                    document.getElementsByClassName("chat-context")[i].style.display = "none";
+                }
+
+                let html_to_append = "<div class=\"chat-context\" id=\"" + id_to_find + "\">\n\
+                                                    <div class=\"single-server-message\">now talking to user: " + data_username + "</div>\n\
+                                                    <div class=\"single-server-message server-message-public-key\">your public key: <span class=\"server-message-key\" title=\"click to expand\">" + g_rsa_public_key_string + "</span></div>\n\
+                                                    <div class=\"single-server-message server-message-public-key\">his public key: <span class=\"server-message-key\" title=\"click to expand\">" + chat__sanitize_string(channel_tree__get_public_key_by_client_id(g_chat_message_receiver_id)) + "</span></div>\n\
+                                                    <div class=\"single-server-message\"> </div>\n\
+                                                </div>";
+
+                document.getElementById('chat-context-container').insertAdjacentHTML("beforeend", html_to_append);
+
+                let single_chat_context = {
+                    type: "user",
+                    chat_context_id: g_current_chat_context_id,
+                    last_known_message_sender_username: ""
+                };
+
+                g_chat_context_array.push(single_chat_context);
+                chat__bind_private_contexts();
+            }
+            else
+            {
+                for (let i = 0; i < document.getElementsByClassName("chat-context").length; i++)
+                {
+                    document.getElementsByClassName("chat-context")[i].style.display = "none";
+                }
+
+                document.getElementById(id_to_find).style.display = "block";
+
+                // opening the conversation marks it read
+                chat__clear_unread_count(g_chat_message_receiver_id);
+                chat__render_unread_badge(g_chat_message_receiver_id, false);
+            }
+            is_found = document.querySelector('[data-chat-context-selector-id="user-' + g_chat_message_receiver_id + '"]');
+
+            if (is_found == null)
+            {
+                let to_append = "<div class=\"chat-context-selector\" data-chat-context-selector-type=\"user\" data-chat-context-selector-id=\"user-" + g_chat_message_receiver_id + "\">\n\
+                                                <div class=\"p-container\">\n\
+                                                    <p>" + data_username + "</p>\n\
+                                                </div>\n\
+                                                <div class=\"remove-chat-context-selector\" data-chat-context-remove-selector-type=\"user\" data-chat-context-remove-selector-id=\"user-" + g_chat_message_receiver_id + "\">\n\
+                                                </div>\n\
+                                            </div>";
+
+                document.getElementById("chat-context-selectors-container").insertAdjacentHTML("beforeend", to_append);
+            }
+
+            for (let x = 0; x < document.getElementsByClassName("remove-chat-context-selector").length; x++)
+            {
+                document.getElementsByClassName("remove-chat-context-selector")[x].onclick = UI.chat_context_remove_onclick;
+            }
+
+            for (let x = 0; x < document.getElementsByClassName("chat-context-selector").length; x++)
+            {
+                document.getElementsByClassName("chat-context-selector")[x].onclick = UI.chat_context_selector_onclick;
+            }
+
+            document.querySelector('[data-chat-context-selector-id="user-' + g_chat_message_receiver_id + '"]').style.backgroundColor = "#36393f";
+
+            UI.enable_inputs();
+        }
+
+        // remember the profile target for the avatar response
+        g_profile_avatar_client_id = parseInt(g_chat_message_receiver_id);
+
+        let message_object = {
+            message: {
+                type: "request_avatar_for_client",
+                client_id: parseInt(g_chat_message_receiver_id)
+            }
+        };
+
+        connection__send_message_object(message_object);
+
+        // show profile groups for local and remote users
+
+        document.getElementById("current-client-description").style.display = "block";
+        document.getElementById("current-channel-description").style.display = "none";
+        let client = channel_tree__get_client_by_client_id(g_chat_message_receiver_id);
+        let client_name = document.getElementById("current-client-description-client-name");
+        client_name.textContent = client.username;
+        if (Number(client.client_id) === Number(g_local_client_id))
+        {
+            let self_label = document.createElement("span");
+            self_label.className = "client-profile-self-label";
+            self_label.textContent = " (you)";
+            client_name.appendChild(self_label);
+        }
+        document.getElementById("current-client-description-groups").innerHTML = "";
+        document.getElementById("current-client-avatar").style.backgroundImage = "";
+        document.getElementById("current-client-avatar").style.backgroundSize = "";
+        document.getElementById("current-client-avatar").style.width = "";
+        document.getElementById("current-client-avatar").style.height = "";
+
+        // show initials until an avatar is available
+        channel_tree__set_profile_avatar_monogram(client.username);
+
+        document.getElementById("current-client-description-meta").textContent = channel_tree__describe_client_for_profile(client);
+
+        channel_groups__profile(client);
+        client_status__select("profile", client);
+    },
+
+    /**
+     * @brief builds and wires the selected user menu
+     *
+     * @param Element currentTarget -> selected user row
+     * @param number clientX -> menu horizontal position
+     * @param number clientY -> menu vertical position
+     * @param boolean is_this_idle_client -> whether the row represents an idle client
+     * @param boolean is_this_music_bot_client -> whether the row represents a music bot
+     *
+     * @return void
+     */
+    show_connected_user_menu: function(currentTarget, clientX, clientY, is_this_idle_client, is_this_music_bot_client)
+    {
+        g_selected_client_id = currentTarget.getAttribute("data-connected-client-id");
+        console.log("selected_client_id : " + g_selected_client_id);
+
+        let elements = document.getElementsByClassName('connected-client');
+
+        for (let i = 0; i < elements.length; i++)
+        {
+            elements[i].style.backgroundColor = "";
+        }
+
+        let elements1 = document.getElementsByClassName('single-channel');
+        for (let i = 0; i < elements1.length; i++)
+        {
+            elements1[i].style.backgroundColor = "";
+        }
+
+        currentTarget.style.backgroundColor = "var(--row-rightclick-selection, #333030)";
+
+        UI.delete_contextmenus();
+
+        let contextmenu_useronclick = "";
+
+        if (g_selected_client_id != g_local_client_id)
+        {
+            let the_client = channel_tree__get_client_by_client_id(g_selected_client_id);
+
+            let string_to_append = "";
+
+            if (the_client.is_music_bot == false)
+            {
+                string_to_append += "<p class='context-menu-item' data-action='12'>kick</p>";
+            }
+            if (the_client.is_music_bot == false)
+            {
+                string_to_append += "<p class='context-menu-item' data-action='13'>ban</p>";
+            }
+
+            if (is_this_idle_client == true)
+            {
+                contextmenu_useronclick = "<div class=\"channel-list-context-menu\" style=\"top: " + clientY.toString() + "px; left:" + clientX.toString() + "px; \">\n\
+                                                <div class='channel-list-context-menu-background'>\n\
+                                                </div>\n\
+                                                <div class='channel-list-context-menu-items'>\n\
+                                                    <p class='context-menu-item' data-action='11'>call</p>\n\
+                                                    <p class='context-menu-item' data-action='8'>poke</p>\n\
+                                                    "+ string_to_append +"\n\
+                                                </div>\n\
+                                            </div>";
+            }
+            else if (is_this_music_bot_client == true)
+            {
+                contextmenu_useronclick = "<div class=\"channel-list-context-menu\" style=\"top: " + clientY.toString() + "px; left:" + clientX.toString() + "px; \">\n\
+                                                <div class='channel-list-context-menu-background'>\n\
+                                                </div>\n\
+                                                <div class='channel-list-context-menu-items'>\n\
+                                                    <p class='context-menu-item' data-action='15'>manage</p>\n\
+                                                    <p class='context-menu-item' data-action='5'>" + ((the_client.is_muted_by_local_client == true ) ? 'un-mute' : 'mute') + "</p>\n\
+                                                    <p class='context-menu-item' data-action='18'>adjust volume</p>\n\
+                                                    <p class='context-menu-item' data-action='16'>delete</p>\n\
+                                                    <p class='context-menu-item' data-action='20'>set name</p>\n\
+                                                    "+ string_to_append +"\n\
+                                                </div>\n\
+                                            </div>";
+            }
+            else
+            {
+                contextmenu_useronclick = "<div class=\"channel-list-context-menu\" style=\"top: " + clientY.toString() + "px; left:" + clientX.toString() + "px; \">\n\
+                                                <div class='channel-list-context-menu-background'>\n\
+                                                </div>\n\
+                                                <div class='channel-list-context-menu-items'>\n\
+                                                    <p class='context-menu-item' data-action='4'>" + ((the_client.is_ignored_by_local_client == true ) ? 'un-ignore' : 'ignore') + "</p>\n\
+                                                    <p class='context-menu-item' data-action='5'>" + ((the_client.is_muted_by_local_client == true ) ? 'un-mute' : 'mute') + "</p>\n\
+                                                    <p class='context-menu-item' data-action='18'>adjust volume</p>\n\
+                                                    <p class='context-menu-item' data-action='7'>info</p>\n\
+                                                    <p class='context-menu-item' data-action='8'>poke</p>\n\
+                                                    "+ string_to_append +"\n\
+                                                </div>\n\
+                                            </div>";
+            }
+
+            // <p class='context-menu-item " + ((channel_tree__is_local_client_admin() == false) ? 'context-menu-item-disabled' : '') + "' data-action='15'>kick</p>\n\
+            // <p class='context-menu-item " + ((channel_tree__is_local_client_admin() == false) ? 'context-menu-item-disabled' : '') + "' data-action='16'>ban</p>\n\
+
+        }
+        else
+        {
+            let avatar_menu_html = "";
+            if (g_server_policy.is_avatar_upload_allowed == true)
+            {
+                avatar_menu_html = "<label class='context-menu-item' data-action='10' id='custom-file-upload-avatar' for='choose_avatar_input'>set avatar<input id='choose_avatar_input' type='file' accept='.png,.jpg,.jpeg' style='display: none'></label><p class='context-menu-item' data-action='17'>delete avatar</p>";
+            }
+
+            contextmenu_useronclick = "<div class=\"channel-list-context-menu\" style=\"top: " + clientY.toString() + "px; left:" + clientX.toString() + "px; \">\n\
+                                                <div class='channel-list-context-menu-background'>\n\
+                                                </div>\n\
+                                                <div class='channel-list-context-menu-items'>\n\
+                                                    <p class='context-menu-item' data-action='9'>set username</p>\n\
+                                                    " + avatar_menu_html + "\n\
+                                                    <p class='context-menu-item' data-action='7'>info</p>\n\
+                                                </div>\n\
+                                            </div>";
+        }
+
+        document.getElementById("contextmenus-container").insertAdjacentHTML("beforeend", contextmenu_useronclick);
+        let choose_avatar_input = document.getElementById("choose_avatar_input");
+        if (choose_avatar_input != null)
+        {
+            choose_avatar_input.onchange = UI.choose_avatar_input_onchange;
+        }
+        moderation__filter_music_menu();
+        document.getElementById("contextmenus-container").getElementsByClassName("channel-list-context-menu")[0].style.top = clientY.toString();
+        document.getElementById("contextmenus-container").getElementsByClassName("channel-list-context-menu")[0].style.left = clientX.toString();
+
+        let contextmenu_item_count = document.getElementsByClassName("context-menu-item").length;
+
+        for (let i = 0; i < contextmenu_item_count; i++)
+        {
+            let element = document.getElementsByClassName("context-menu-item")[i];
+            if (parseInt(element.getAttribute("data-action")) == 10)
+            {
+                continue;
+            }
+            document.getElementsByClassName("context-menu-item")[i].addEventListener("click", UI.contextmenuitem_onclick);
+
+        }
+        let client_menu = document.querySelector("#contextmenus-container .channel-list-context-menu");
+        let menu_client = channel_tree__get_client_by_client_id(Number(g_selected_client_id));
+        client_menu.dataset.contextClient = g_selected_client_id;
+        moderation__refresh_menu_access();
+        moderation__attach_client_menu(client_menu, menu_client);
+        groups__attach_assignment_menu(client_menu, menu_client);
+
+
+
+    },
+
+    /**
+     * @brief applies the selected font to the message input
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    contextmenuitem_chat_input_container_onclick: function(event)
+    {
+        let action = event.srcElement.getAttribute("data-action");
+
+        g_selected_font = action;
+        UI.delete_contextmenus();
+        console.log(g_selected_font);
+
+        // this is the correct way to clear classList
+
+        document.getElementById("chat-input-container-text-input").setAttribute("class", "");
+        document.getElementById("chat-input-container-text-input").classList.add(action);
+    },
+
+    /**
+     * @brief handles the selected channel or user menu action
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    contextmenuitem_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        let item = event.currentTarget || event.srcElement;
+        let action = item.getAttribute("data-action");
+        if (item.getAttribute("aria-disabled") === "true" || !moderation__menu_action_allowed(action, item.closest(".channel-list-context-menu")))
+        {
+            event.preventDefault?.();
+            return;
+        }
+
+        UI.delete_contextmenus();
+
+        if (action == "server-info")
+        {
+            server_info__open();
+        }
+        else if (action == "server-moderation")
+        {
+            moderation__tools();
+        }
+        else if (action == 0)
+        {
+            document.getElementById("background-container").style.display = "block";
+            document.getElementById("channel-properties-edit-container").style.display = "block";
+            document.getElementById("create-channel-hidden-parent-id").value = g_selected_channel_id;
+            document.getElementById("create-channel-button").style.display = "";
+            document.getElementById("edit-channel-button").style.display = "none";
+
+            // one dialog serves both jobs, so say which one this is
+            document.querySelector("#channel-properties-edit .dialog-title").innerHTML = "Create Channel";
+
+            document.getElementById("channel-properties-input-channel-name").value = "";
+            document.getElementById("channel-properties-input-channel-description").value = "";
+            document.getElementById("channel-properties-input-channel-password").value = "";
+            UI.set_channel_password_inputs(false);
+            document.getElementById("channel-properties-enable-audio-checkbox").checked = true;
+            document.getElementById("channel-properties-enable-video-checkbox").checked = false;
+            document.getElementById("channel-properties-limit-clients-checkbox").checked = false;
+            document.getElementById("channel-properties-input-max-clients").value = "";
+            UI.refresh_channel_limit_input_visibility();
+            UI.set_channel_power_inputs(null);
+
+            g_channel_properties_edit_channel_id = null;
+            UI.refresh_channel_edit_icon_box(null);
+        }
+        else if (action == 1)
+        {
+            let message_object = {
+                message: {
+                    type: "delete_channel_request",
+                    channel_id: parseInt(g_selected_channel_id)
+                }
+            };
+
+            // do not log request bodies: some contain passwords or private content
+
+            connection__send_message_object(message_object);
+            console.log("delete channel requested: channel_id=" + g_selected_channel_id);
+
+            document.getElementById("current-channel-description").innerHTML = "";
+        }
+        else if (action == 2)
+        {
+            document.getElementById("background-container").style.display = "block";
+            document.getElementById("channel-properties-edit-container").style.display = "block";
+            document.getElementById("create-channel-hidden-parent-id").value = g_selected_channel_id;
+
+            let index = channel_tree__get_channel_index_in_array_by_channel_id(g_channel_list, g_selected_channel_id);
+            // assign raw input values. HTML escaping here would change the saved text
+            document.getElementById("channel-properties-input-channel-name").value = g_channel_list[index].name;
+            document.getElementById("channel-properties-input-channel-description").value = g_channel_list[index].description;
+            UI.set_channel_password_inputs(g_channel_list[index].is_using_password === true);
+            document.getElementById("channel-properties-enable-audio-checkbox").checked = g_channel_list[index].is_audio_enabled === true;
+            document.getElementById("channel-properties-enable-video-checkbox").checked = g_channel_list[index].is_video_stream_enabled === true;
+            document.getElementById("channel-properties-limit-clients-checkbox").checked = g_channel_list[index].is_client_limit_active == true;
+            document.getElementById("channel-properties-input-max-clients").value = (g_channel_list[index].is_client_limit_active == true && g_channel_list[index].max_client_count > 0) ? g_channel_list[index].max_client_count : "";
+            UI.refresh_channel_limit_input_visibility();
+
+            document.getElementById("create-channel-button").style.display = "none";
+            UI.set_channel_power_inputs(g_channel_list[index]);
+            document.getElementById("edit-channel-button").style.display = "";
+
+            // same dialog as channel creation, so put its own name back
+            document.querySelector("#channel-properties-edit .dialog-title").innerHTML = "Edit Channel";
+
+            // show the channel's current icon. the server authorizes icon changes
+            g_channel_properties_edit_channel_id = parseInt(g_selected_channel_id);
+            UI.refresh_channel_edit_icon_box(g_channel_list[index]);
+        }
+        else if (action == 3)
+        {
+            moderation__join_channel(Number(g_selected_channel_id));
+        }
+        else if (action == 4) // ignore client locally
+        {
+            let client_id_of_interest = parseInt(g_selected_client_id);
+            let client_index = channel_tree__get_client_index_in_array_by_client_id(client_id_of_interest);
+
+            if (client_index == -1 || client_id_of_interest == g_local_client_id)
+            {
+                return; // not found
+            }
+
+            g_client_list[client_index].is_ignored_by_local_client = !g_client_list[client_index].is_ignored_by_local_client;
+            chat__remember_peer_state();
+            if (android_host__is_ui_only_runtime())
+            {
+                const client = g_client_list[client_index];
+                connection__send_local_command("set_local_ignore",
+                {
+                    identity_hash: client.identity_hash,
+                    public_key: client.public_key,
+                    ignored: client.is_ignored_by_local_client
+                });
+            }
+            console.log("local ignore toggled: client_id=" + client_id_of_interest + " ignored=" + g_client_list[client_index].is_ignored_by_local_client);
+
+            if (g_client_list[client_index].is_ignored_by_local_client == true)
+            {
+                let element = document.querySelector('.connected-client[data-connected-client-id="'+g_selected_client_id+'"]').getElementsByClassName('client-ignore-state')[0].style.display = "block";
+            }
+            else
+            {
+                let element = document.querySelector('.connected-client[data-connected-client-id="'+g_selected_client_id+'"]').getElementsByClassName('client-ignore-state')[0].style.display = "none";
+            }
+
+        }
+        else if (action == 5) // mute client locally
+        {
+            let client_id_of_interest = parseInt(g_selected_client_id);
+            let client_index = channel_tree__get_client_index_in_array_by_client_id(client_id_of_interest);
+
+            if (client_index == -1 || client_id_of_interest == g_local_client_id)
+            {
+                return; // not found
+            }
+
+            g_client_list[client_index].is_muted_by_local_client = !g_client_list[client_index].is_muted_by_local_client;
+            console.log("local mute toggled: client_id=" + client_id_of_interest + " muted=" + g_client_list[client_index].is_muted_by_local_client);
+
+            if (g_client_list[client_index].is_muted_by_local_client == true)
+            {
+                let element = document.querySelector('.connected-client[data-connected-client-id="'+g_selected_client_id+'"]').getElementsByClassName('client-mute-state')[0].style.display = "block";
+            }
+            else
+            {
+                let element = document.querySelector('.connected-client[data-connected-client-id="'+g_selected_client_id+'"]').getElementsByClassName('client-mute-state')[0].style.display = "none";
+            }
+
+        }
+        else if (action == 7) // public client details are already available. other details require server permission
+        {
+            UI.show_client_info_popup(g_selected_client_id);
+
+
+        }
+        else if (action == 8)
+        {
+            document.getElementById("poke-client-enter-container").style.display = "block";
+        }
+        else if (action == 18) // adjust this client's playback volume (local only)
+        {
+            let current_gain = g_client_volume_by_id[g_selected_client_id];
+            if (current_gain == null)
+            {
+                current_gain = 1.0;
+            }
+            let percent = Math.round(current_gain * 100);
+
+            // keep the volume slider bound to this client if the menu selection changes
+            document.getElementById("adjust-volume-slider").setAttribute("data-target-client-id", g_selected_client_id);
+            document.getElementById("adjust-volume-slider").value = percent;
+            document.getElementById("adjust-volume-value-label").innerHTML = percent + "%";
+            document.getElementById("adjust-volume-username-label").innerHTML = chat__sanitize_string(channel_tree__get_username_by_client_id(g_selected_client_id));
+            document.getElementById("adjust-volume-container").style.display = "block";
+        }
+        else if (action == 9)
+        {
+            let self_client = channel_tree__get_client_by_client_id(g_local_client_id);
+            document.getElementById("input-set-new-username").value = self_client.username;
+            document.getElementById("set-new-username-enter-container").style.display = "block";
+        }
+        else if (action == 17) // delete your own avatar
+        {
+            if (g_server_policy.is_avatar_upload_allowed == false)
+            {
+                return;
+            }
+
+            let message_object = { message: { type: "delete_avatar" } };
+            connection__send_message_object(message_object);
+
+            // clear the local avatar while awaiting server confirmation
+            channel_tree__apply_avatar_to_ui(g_local_client_id, "");
+        }
+        else if (action == 11)
+        {
+            if (!groups__is_allowed(channel_tree__get_client_by_client_id(g_local_client_id), "call_idle_clients"))
+            {
+                utils__custom_alert("insufficient permissions");
+                return;
+            }
+            // play sound
+
+            if (g_are_sound_effects_enabled)
+            {
+                sounds__play("call");
+            }
+
+            let element = document.querySelector('.marquee-music-playing-container[data-marquee-music-playing-container-id="' + g_selected_client_id + '"]');
+            if (element != null)
+            {
+                element.style.display = "inline-block";
+                document.getElementById("marquee-song-name-client-id-" + g_selected_client_id).innerHTML = "calling ... ...";
+            }
+
+            setTimeout( () => {
+                if (document.getElementById("marquee-song-name-client-id-" + g_selected_client_id) != null) {
+                    document.getElementById("marquee-song-name-client-id-" + g_selected_client_id).innerHTML = "";
+                }
+                document.querySelector('.marquee-music-playing-container[data-marquee-music-playing-container-id="' + g_selected_client_id + '"]').style.display = "none";
+            }, 14000);
+
+            // hide the call notice after 17 seconds if it still exists
+
+            let message_object = {
+                message: {
+                    type: "call_idle_client_request",
+                    client_id: parseInt(g_selected_client_id),
+                }
+            };
+
+            connection__send_message_object(message_object);
+        }
+        else if (action == 12)
+        {
+            moderation__confirm_client_action(channel_tree__get_client_by_client_id(g_selected_client_id), "kick");
+        }
+        else if (action == 13)
+        {
+            moderation__confirm_client_action(channel_tree__get_client_by_client_id(g_selected_client_id), "ban");
+        }
+        else if (action == 14)
+        {
+            let message_object = {
+                message: {
+                    type: "create_music_bot",
+                    channel_id: parseInt(g_selected_channel_id),
+                    music_bot_username: "radio2198124"
+                }
+            };
+
+            connection__send_message_object(message_object);
+        }
+        else if (action == 15)
+        {
+            client_msg.send_musicbot_song_list_request();
+        }
+        else if (action == 16)
+        {
+
+            let message_object = {
+                message: {
+                    type: "delete_music_bot",
+                    channel_id: channel_tree__get_client_by_client_id(g_selected_client_id).channel_id,
+                }
+            };
+
+            connection__send_message_object(message_object);
+        }
+        else if (action == 20) // rename the selected music bot
+        {
+            document.getElementById("input-set-new-username").value = channel_tree__get_client_by_client_id(g_selected_client_id).username;
+            document.getElementById("set-new-username-enter-container").style.display = "block";
+        }
+    },
+
+    /**
+     * @brief deletes a message or opens its editor from the message menu
+     *
+     * @param event selected message action
+     */
+    chat_message_contextmenuitem_onclick: function(event)
+    {
+        event.stopPropagation();
+        let action = event.target.getAttribute("data-action");
+
+        UI.delete_chat_message_contextmenu();
+
+        if (action == 0)
+        {
+            let message_object = {
+                message: {
+                    type: "delete_chat_message_request",
+                    message_id: g_selected_server_chat_message_id,
+                    receiver_type: g_chat_message_receiver_type,
+                    receiver_id: parseInt(g_chat_message_receiver_id)
+                }
+            };
+
+            connection__send_message_object(message_object);
+        }
+        else if (action == 1)
+        {
+            let element = document.querySelector('.local-single-chat-message-content-p[data-single-chat-message-server-message-id="' + g_selected_server_chat_message_id + '"]');
+            if (element != null)
+            {
+                chat_reactions__edit(chat_reactions.entries.get(element));
+            }
+        }
+    },
+
+    /**
+     * @brief opens edit and delete actions for the selected local message
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    single_chat_message_onrightclick: function(event)
+    {
+        event.stopPropagation();
+
+        if (event.which == 3)
+        {
+
+            let elements_count1 = document.getElementsByClassName("local-single-chat-message-content-p").length;
+
+            for (let i = 0; i < elements_count1; i++)
+            {
+                document.getElementsByClassName("local-single-chat-message-content-p")[i].classList.remove("single-chat-message-content-p-hover");
+            }
+
+            event.target.classList.add("single-chat-message-content-p-hover");
+
+            // delete old contextmenus
+
+            let elements_count = document.getElementsByClassName("chat-message-context-menu").length;
+
+            for (let i = 0; i < elements_count; i++)
+            {
+                document.getElementsByClassName("chat-message-context-menu")[0].remove();
+            }
+
+            // append new contextmenus
+
+            g_selected_server_chat_message_id = parseInt(event.target.getAttribute("data-single-chat-message-server-message-id"));
+
+            let contextmenu_html = "<div class=\"chat-message-context-menu\" style=\"top: " + event.clientY.toString() + "px; left:" + event.clientX.toString() + "px; \">\n\
+                                                <div class='chat-message-context-menu-background'>\n\
+                                                </div>\n\
+                                                <div class='chat-message-context-menu-items'>\n\
+                                                    <p class='chat-message-context-menu-item' data-action='0'>delete</p>\n\
+                                                    <p class='chat-message-context-menu-item' data-action='1'>edit</p>\n\
+                                                </div>\n\
+                                            </div>";
+
+            document.getElementById("contextmenus-container").insertAdjacentHTML("beforeend", contextmenu_html);
+            document.getElementById("contextmenus-container").getElementsByClassName("chat-message-context-menu")[0].style.top = event.clientY.toString();
+            document.getElementById("contextmenus-container").getElementsByClassName("chat-message-context-menu")[0].style.left = event.clientX.toString();
+
+            let contextmenu_item_count = document.getElementsByClassName("chat-message-context-menu-item").length;
+
+            for (let i = 0; i < contextmenu_item_count; i++)
+            {
+                document.getElementsByClassName("chat-message-context-menu-item")[i].addEventListener("mousedown", UI.chat_message_contextmenuitem_onclick);
+            }
+        }
+
+    },
+
+    /**
+     * @brief sends the draft and keeps refused attachments available for retry
+     *
+     * @return void
+     */
+    send_chat_input_on_click: function()
+    {
+        chat__send_chat_message();
+
+        // a refused file stays attached, so its label comes back
+        chat_files__render_pending_chat_file_label();
+    },
+
+    /**
+     * @brief passes the connection form's target to the connect loop
+     *
+     * @return void
+     */
+    connect_button_onclick: function()
+    {
+        connection__submit_connection_target_from_ui();
+    },
+
+    /**
+     * @brief sends on Enter before the textarea inserts a line break
+     *
+     * @param event key pressed in the chat input
+     */
+    chat_input_on_keydown: function(event)
+    {
+        if (event.isComposing || event.keyCode === 229)
+        {
+            return;
+        }
+        if (event.key === "Enter" || event.keyCode === 13)
+        {
+            event.preventDefault();
+            if (!event.repeat)
+            {
+                chat__send_chat_message();
+            }
+        }
+    },
+
+    /**
+     * @brief handles keyboards that insert a line break without an Enter key event
+     *
+     * @param event pending change to the chat input
+     */
+    chat_input_on_beforeinput: function(event)
+    {
+        if (!event.isComposing && (event.inputType === "insertLineBreak" || event.inputType === "insertParagraph"))
+        {
+            event.preventDefault();
+            chat__send_chat_message();
+        }
+    },
+
+    /**
+     * @brief updates the typing indicator after text input
+     *
+     * @param event key released in the chat input
+     */
+    chat_input_on_keyup: function(event)
+    {
+        if (event.key === "Enter" || event.keyCode === 13 || event.isComposing || event.keyCode === 229)
+        {
+            return;
+        }
+        chat__send_typing_indicator();
+    },
+
+    /**
+     * @brief attaches a selected image through the shared picture preview path
+     *
+     * @return void
+     */
+    choose_image_input: function()
+    {
+        if (G_HAS_DOM == false)   // multiple webworkers are used within same file
+        {
+            return;
+        }
+
+        let files = document.getElementById('choose_image_input').files;
+
+        if (files.length > 0)
+        {
+            chat_files__attach_chat_picture(files[0]);
+        }
+    },
+
+    /**
+     * @brief adds a connection password row with its cipher selector and remove button
+     *
+     * @param key_string the key to show, "" for an empty row the user fills in
+     * @param cipher_type cipher selected for this password, defaulting to aes256
+     *
+     * @return void
+     */
+    add_key_row: function(key_string, cipher_type = "aes256")
+    {
+        const grid = document.getElementById("connect-keys-grid");
+        const label = document.createElement("label");
+        const field = document.createElement("div");
+        const key_input = document.createElement("input");
+        const generated_id_for_html_input = "input-key-" + custom_key_count;
+
+        label.className = "connect-window-label";
+        label.setAttribute("data-key-id", custom_key_count);
+        label.setAttribute("for", generated_id_for_html_input);
+        label.textContent = "key " + custom_key_count;
+
+        field.className = "connect-window-field";
+        field.setAttribute("data-key-id", custom_key_count);
+
+        // the selected cipher applies to this password's encryption layer
+        const key_type = document.createElement("select");
+        key_type.className = "connect-key-type";
+        key_type.id = "input-key-type-" + custom_key_count;
+        key_type.title = "the type of this key";
+        for (let type of CONNECTION_CIPHERS)
+        {
+            const option = document.createElement("option");
+            option.value = type;
+            option.textContent = type === "trivium80" ? "Trivium-80 (fixed IV compatibility)" : type === "chacha20" ? "ChaCha20" : type.replace("256", "-256");
+            key_type.appendChild(option);
+        }
+        key_type.value = cipher_type;
+        field.appendChild(key_type);
+
+        key_input.className = "text-input-pretty";
+        key_input.id = generated_id_for_html_input;
+        key_input.setAttribute("data-id", custom_key_count);
+        key_input.placeholder = "the key";
+        key_input.value = (typeof key_string === "string") ? key_string : "";
+        field.appendChild(key_input);
+
+        // remove this password row. login collects the remaining inputs in DOM order
+        const remove_button = document.createElement("div");
+        remove_button.className = "remove-key-button";
+        remove_button.textContent = "\u2715";
+        remove_button.title = "remove this key";
+        const removed_key_id = custom_key_count;
+        remove_button.onclick = function()
+        {
+            const removed = document.querySelectorAll('#connect-keys-grid [data-key-id="' + removed_key_id + '"]');
+            for (let i = 0; i < removed.length; i++)
+            {
+                removed[i].remove();
+            }
+
+            // renumber visible labels without changing input IDs
+            const remaining_labels = document.querySelectorAll('#connect-keys-grid label[data-key-id]');
+            for (let j = 0; j < remaining_labels.length; j++)
+            {
+                remaining_labels[j].textContent = "key " + j;
+            }
+        };
+        field.appendChild(remove_button);
+
+        grid.appendChild(label);
+        grid.appendChild(field);
+        custom_key_count++;
+    },
+
+    /**
+     * @brief shows or hides the key editor without changing the login keys
+     *
+     * @return void
+     */
+    show_connection_advanced: function()
+    {
+        const checkbox = document.getElementById("connect-show-advanced");
+        document.getElementById("connect-keys-section").hidden = !checkbox.checked;
+        checkbox.setAttribute("aria-expanded", String(checkbox.checked));
+    },
+
+    /**
+     * @brief adds an empty connection password row and scrolls it into view
+     *
+     * @return void
+     */
+    add_key_button_on_click: function()
+    {
+        // one more empty row of the connect window's grid, scrolled into view
+        UI.add_key_row("");
+        document.getElementById("verification-system").scrollTop = document.getElementById("verification-system").scrollHeight;
+    },
+
+    /**
+     * @brief toggles the debug log textarea between visible and hidden
+     *
+     * @return void
+     */
+    show_hide_log_on_click: function()
+    {
+        if (g_textarea_log.style.display == "none")
+        {
+            g_textarea_log.style.display = "block";
+        }
+        else if (g_textarea_log.style.display == "block")
+        {
+            g_textarea_log.style.display = "none";
+        }
+    },
+
+    /**
+     * @brief sends the entered username to the server
+     */
+    connected_local_user_input_on_focusout: function()
+    {
+        let new_username = this.value;
+
+        if (new_username.trim().length === 0)
+        {
+            this.value = g_local_username;
+            this.setAttribute("value", g_local_username);
+            UI.schedule_member_list_sync();
+            return;
+        }
+
+        let index = channel_tree__get_client_index_in_array_by_client_id(g_local_client_id);
+
+        g_client_list[index].username = new_username;
+        g_local_username = new_username;
+        {
+            let rename_input = document.getElementById('connected-local-client-input');
+            if (rename_input != null)
+            {
+                rename_input.setAttribute('value', g_local_username);
+            }
+        }
+
+        client_msg.send_change_client_username_request(new_username, g_local_client_id);
+        console.log("local username changed");
+    },
+
+    /**
+     * @brief closes the identity import dialog and its overlay
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    close_button_identity_string_use: function(event)
+    {
+        UI.identity_clear_file_selection();
+        document.getElementById("identity-string-use-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+    },
+
+    /**
+     * @brief opens the channel menu after a stationary touch and keeps it open on release
+     *
+     * @param HTMLElement row -> channel row to handle once
+     *
+     * @return void
+     */
+    setup_channel_touch_events: function(row)
+    {
+        if (channel_touch_rows.has(row))
+        {
+            return;
+        }
+        channel_touch_rows.add(row);
+        row.addEventListener("touchstart", function(start_event)
+        {
+            let timer = null;
+            let menu_opened = false;
+            let client_x = 0;
+            let client_y = 0;
+
+            /**
+             * @brief cancels the pending channel long-press timer
+             *
+             * @return void
+             */
+            function cancel_timer()
+            {
+                window.clearTimeout(timer);
+                timer = null;
+            }
+
+            /**
+             * @brief cancels the channel hold and removes its temporary input listeners
+             *
+             * @return void
+             */
+            function finish_press()
+            {
+                cancel_timer();
+                document.removeEventListener("touchstart", cancel_multiple_touches, true);
+                document.removeEventListener("touchmove", cancel_timer, true);
+                document.removeEventListener("touchend", end_press, true);
+                document.removeEventListener("touchcancel", finish_press, true);
+                document.removeEventListener("scroll", cancel_timer, true);
+                document.removeEventListener("visibilitychange", finish_press);
+                window.removeEventListener("blur", finish_press);
+                if (channel_touch_cancel === finish_press)
+                {
+                    channel_touch_cancel = null;
+                }
+            }
+
+            /**
+             * @brief cancels the channel hold when the gesture stops being a single touch
+             *
+             * @param TouchEvent event -> current touch contacts
+             *
+             * @return void
+             */
+            function cancel_multiple_touches(event)
+            {
+                if (event.touches.length !== 1)
+                {
+                    finish_press();
+                }
+            }
+
+            /**
+             * @brief ends the channel hold and prevents its release from clicking a newly opened menu
+             *
+             * @param TouchEvent event -> touch release event
+             *
+             * @return void
+             */
+            function end_press(event)
+            {
+                if (menu_opened && event.cancelable)
+                {
+                    // prevent the release from clicking the menu that the hold opened
+                    event.preventDefault();
+                }
+                finish_press();
+            }
+
+            if (channel_touch_cancel != null)
+            {
+                channel_touch_cancel();
+            }
+            if (start_event.touches.length !== 1)
+            {
+                return;
+            }
+            client_x = start_event.touches[0].clientX;
+            client_y = start_event.touches[0].clientY;
+            channel_touch_cancel = finish_press;
+            document.addEventListener("touchstart", cancel_multiple_touches, { capture: true, passive: true });
+            document.addEventListener("touchmove", cancel_timer, { capture: true, passive: true });
+            document.addEventListener("touchend", end_press, { capture: true, passive: false });
+            document.addEventListener("touchcancel", finish_press, { capture: true, passive: true });
+            document.addEventListener("scroll", cancel_timer, true);
+            document.addEventListener("visibilitychange", finish_press);
+            window.addEventListener("blur", finish_press);
+            timer = window.setTimeout(function()
+            {
+                let channel_id = parseInt(row.getAttribute("data-channel-id"));
+
+                timer = null;
+                if (!row.isConnected || !g_is_authenticated || g_worker_connection_ended || channel_tree__get_channel_index_in_array_by_channel_id(g_channel_list, channel_id) === -1)
+                {
+                    finish_press();
+                    return;
+                }
+                menu_opened = true;
+                UI.single_channel_onmousedown(start_event, true, client_x, client_y, row);
+            }, 600);
+        }, { passive: true });
+    },
+
+    /**
+     * @brief shows channel details or opens the channel menu
+     *
+     * @param object event -> the mouse event, or a synthetic one for a touch
+     * @param boolean|null is_touch_event -> true when called for a touch
+     * @param number|null touch_clientX -> the touch position
+     * @param number|null touch_clientY -> the touch position
+     * @param Element|null touch_current_target -> the row, when the event has no currentTarget
+     *
+     * @return void
+     */
+    single_channel_onmousedown: function(event, is_touch_event = null, touch_clientX = null, touch_clientY = null, touch_current_target = null)
+    {
+        if (event && typeof event.stopPropagation === "function")
+        {
+            event.stopPropagation();
+        }
+
+        let clientX = 0;
+        let clientY = 0;
+        let currentTarget = null;
+
+        if (event.currentTarget == null)
+        {
+            currentTarget = touch_current_target;
+        }
+        else
+        {
+            currentTarget = event.currentTarget;
+        }
+
+        if (currentTarget.classList.contains("idle-channel"))
+        {
+            return;
+        }
+
+        if (is_touch_event == null)
+        {
+            clientX = event.clientX;
+            clientY = event.clientY;
+        }
+        else
+        {
+            clientX = touch_clientX;
+            clientY = touch_clientY;
+        }
+
+        if (event.which == 1)
+        {
+            let channel_id = parseInt(currentTarget.getAttribute("data-channel-id"));
+            let index = channel_tree__get_channel_index_in_array_by_channel_id(g_channel_list, channel_id);
+
+            document.getElementById("current-client-description").style.display = "none";
+            document.getElementById("current-channel-description").style.display = "block";
+
+            server_info__show_channel_description(g_channel_list[index]);
+        }
+        if (event.which == 3 || is_touch_event == true)
+        {
+            let elements = document.getElementsByClassName('single-channel');
+
+            for (let i = 0; i < elements.length; i++)
+            {
+                elements[i].style.backgroundColor = "";
+            }
+
+            let elements1 = document.getElementsByClassName('connected-client');
+
+            for (let i = 0; i < elements1.length; i++)
+            {
+                elements1[i].style.backgroundColor = "";
+            }
+
+            currentTarget.style.backgroundColor = "var(--row-rightclick-selection, #333030)";
+            g_selected_channel_id = parseInt(currentTarget.getAttribute("data-channel-id"));
+
+            UI.delete_contextmenus();
+
+            // the root channel can be edited but not deleted
+            let selected_channel_index = channel_tree__get_channel_index_in_array_by_channel_id(g_channel_list, g_selected_channel_id);
+            let delete_menu_item_html =
+                (selected_channel_index != -1 && g_channel_list[selected_channel_index].is_root_channel == true) ? "" : "<p class='context-menu-item' data-action='1'>delete</p>";
+            let server_info_menu_item_html =
+                (selected_channel_index != -1 && g_channel_list[selected_channel_index].is_root_channel == true) ? "<p class='context-menu-item' data-action='server-info'>server info</p><p class='context-menu-item' data-action='server-moderation'>server moderation</p>" : "";
+
+            let contextmenu_html = "<div class=\"channel-list-context-menu\" style=\"top: " + clientY + "px; left:" + clientX.toString() + "px; \">\n\
+                                        <div class='channel-list-context-menu-background'>\n\
+                                        </div>\n\
+                                        <div class='channel-list-context-menu-items'>\n\
+                                            " + server_info_menu_item_html + "\n\
+                                            <p class='context-menu-item' data-action='0'>create</p>\n\
+                                            " + delete_menu_item_html + "\n\
+                                            <p class='context-menu-item' data-action='2'>edit</p>\n\
+                                            <p class='context-menu-item' data-action='3'>join</p>\n\
+                                            <p class='context-menu-item' data-action='14'>create music bot</p>\n\
+                                        </div>\n\
+                                    </div>";
+
+            document.getElementById("contextmenus-container").insertAdjacentHTML("beforeend", contextmenu_html);
+            moderation__filter_music_menu();
+            document.getElementById("contextmenus-container").getElementsByClassName("channel-list-context-menu")[0].style.top = clientY.toString();
+            document.getElementById("contextmenus-container").getElementsByClassName("channel-list-context-menu")[0].style.left = clientX.toString();
+
+            let contextmenu_item_count = document.getElementsByClassName("context-menu-item").length;
+
+            for (let i = 0; i < contextmenu_item_count; i++)
+            {
+                document.getElementsByClassName("context-menu-item")[i].addEventListener("click", UI.contextmenuitem_onclick);
+            }
+
+            let channel_id = parseInt(currentTarget.getAttribute("data-channel-id"));
+            let channel_menu = document.querySelector("#contextmenus-container .channel-list-context-menu");
+            channel_menu.dataset.contextChannel = channel_id;
+            moderation__refresh_menu_access();
+            moderation__send("channel_access_request", { channel_id: channel_id });
+            let index = channel_tree__get_channel_index_in_array_by_channel_id(g_channel_list, channel_id);
+
+            server_info__show_channel_description(g_channel_list[index]);
+        }
+    },
+
+    /**
+     * @brief shows known client details and requests restricted fields separately
+     *
+     * @param number client_id -> the client
+     *
+     * @return void
+     */
+    show_client_info_popup: function(client_id)
+    {
+        let client = channel_tree__get_client_by_client_id(client_id);
+        if (client == null)
+        {
+            return;
+        }
+
+
+        UI.show_client_info_popup_shell();
+
+        document.getElementById("client-info-username").innerText = client.username;
+
+
+        let group_names = [];
+        for (let i = 0; i < client.group_ids.length; i++)
+        {
+            let group = channel_tree__get_group_by_group_id(client.group_ids[i]);
+            if (group != null)
+            {
+                group_names.push(group.group_name);
+            }
+        }
+        document.getElementById("client-info-groups").innerText = (group_names.length > 0) ? group_names.join(", ") : "-";
+
+        // a connected user was last seen now
+        let live_status = (client.is_idle == true) ? "idle" : "online";
+        document.getElementById("client-info-status").innerText = live_status;
+        document.getElementById("client-info-status").className = "client-info-status-" + live_status;
+        document.getElementById("client-info-last-seen").innerText = "online now";
+
+        // admin rows: cleared now, filled by the server reply if we are an admin
+        document.getElementById("client-info-connected").innerText = "";
+        document.getElementById("client-info-ip").innerText = "";
+        document.getElementById("client-info-country").innerText = "";
+        document.getElementById("client-info-last-action").innerText = "";
+        document.getElementById("client-info-identity").innerText = "";
+
+        document.getElementById("client-info-container").style.display = "block";
+        client_status__select("popup", client);
+    },
+
+    /**
+     * @brief moves conversation markup to match the completed offline history state change
+     *
+     * @param object promotion -> what the state half did
+     * @param object client -> the connected client
+     *
+     * @return void
+     */
+    promote_offline_chat_context_render: function(promotion, client)
+    {
+        if (promotion == null || promotion.did_promote == false)
+        {
+            return;
+        }
+        if (client == null)
+        {
+            return;
+        }
+
+        let offline_context = document.getElementById(promotion.offline_context_id);
+        let live_context = document.getElementById(promotion.live_context_id);
+
+        if (promotion.had_live_context == false)
+        {
+            // no live chat yet: the offline one simply becomes it, history and all
+            if (offline_context != null)
+            {
+                offline_context.id = promotion.live_context_id;
+            }
+        }
+        else if (offline_context != null && live_context != null)
+        {
+            // both exist: move what was said while they were away into the live thread
+            while (offline_context.firstChild != null)
+            {
+                live_context.appendChild(offline_context.firstChild);
+            }
+
+            offline_context.remove();
+        }
+
+        // move the saved conversation tab to the connected client
+        let offline_selector = document.querySelector('[data-chat-context-selector-id="offline-' + client.identity_hash + '"]');
+        if (offline_selector != null)
+        {
+            if (document.querySelector('[data-chat-context-selector-id="user-' + client.client_id + '"]') != null)
+            {
+                offline_selector.remove();
+            }
+            else
+            {
+                offline_selector.setAttribute("data-chat-context-selector-id", "user-" + client.client_id);
+                let remove_button = offline_selector.querySelector(".remove-chat-context-selector");
+                if (remove_button != null)
+                {
+                    remove_button.setAttribute("data-chat-context-remove-selector-id", "user-" + client.client_id);
+                }
+            }
+        }
+
+        // keep the promoted conversation visible after its recipient state changes
+        if (promotion.was_open == true)
+        {
+            let live_element = document.getElementById(promotion.live_context_id);
+
+            if (live_element != null)
+            {
+                live_element.style.display = "block";
+            }
+
+            UI.enable_inputs();
+        }
+
+        UI.schedule_member_list_sync();
+    },
+
+    /**
+     * @brief opens the conversation for a saved identity and shows whether offline delivery is available
+     *
+     * @param offline_contact saved recipient to display
+     */
+    open_offline_chat_context: function(offline_contact)
+    {
+        let context_id = "chat-context-offline-" + offline_contact.identity_hash;
+
+        let can_be_delivered = groups__is_allowed(channel_tree__get_client_by_client_id(g_local_client_id), "send_offline_messages") && (typeof offline_contact.public_key === "string" && offline_contact.public_key.length > 0);
+
+        if (document.getElementById(context_id) == null)
+        {
+            // a saved recipient needs a public key before messages can be encrypted
+            let header_note = can_be_delivered ? " (offline - they get this when they return)" : " (offline messages unavailable)";
+
+            let html_to_append = "<div class=\"chat-context\" id=\"" + context_id + "\">\n\
+                                    <div class=\"single-server-message\">now talking to user: " + chat__sanitize_string(offline_contact.username) + header_note + "</div>\n\
+                                </div>";
+            document.getElementById('chat-context-container').insertAdjacentHTML("beforeend", html_to_append);
+
+            g_chat_context_array.push({
+                type: "user",
+                chat_context_id: context_id,
+                peer_public_key: offline_contact.public_key || "",
+                peer_identity_hash: offline_contact.identity_hash,
+                peer_username: offline_contact.username,
+                last_known_message_sender_username: ""
+            });
+        }
+
+        for (let i = 0; i < document.getElementsByClassName("chat-context").length; i++)
+        {
+            document.getElementsByClassName("chat-context")[i].style.display = "none";
+        }
+
+        document.getElementById(context_id).style.display = "block";
+
+        chat_files__cancel_pending_read();
+
+        g_current_chat_context_id = context_id;
+        chat_replies__refresh();
+        g_chat_message_receiver_type = "user";
+        g_chat_message_receiver_id = -1;              // no connected recipient
+        g_offline_chat_recipient_identity_hash = offline_contact.identity_hash;
+
+        UI.enable_inputs();
+        UI.schedule_member_list_sync();
+
+        chat__scroll_chat_to_end(true);
+    },
+
+    /**
+     * @brief shows the saved name, groups and last seen time of an offline user
+     *
+     * @param identity_hash saved identity to display
+     */
+    show_offline_contact_info_popup: function(identity_hash)
+    {
+        let stored_client = null;
+        for (let i = 0; i < g_offline_client_list.length; i++)
+        {
+            if (g_offline_client_list[i].identity_hash == identity_hash)
+            {
+                stored_client = g_offline_client_list[i];
+                break;
+            }
+        }
+
+        if (stored_client == null)
+        {
+            return;
+        }
+
+        UI.show_client_info_popup_shell();
+
+        client_status__select("popup", null);
+        document.getElementById("client-info-username").innerText = stored_client.username;
+
+        let group_names = [];
+        for (let i = 0; i < stored_client.group_ids.length; i++)
+        {
+            let group = channel_tree__get_group_by_group_id(stored_client.group_ids[i]);
+            if (group != null)
+            {
+                group_names.push(group.group_name);
+            }
+        }
+        document.getElementById("client-info-groups").innerText = (group_names.length > 0) ? group_names.join(", ") : "-";
+
+        // a zero timestamp means no recorded departure time
+        document.getElementById("client-info-status").innerText = "offline";
+        document.getElementById("client-info-status").className = "client-info-status-offline";
+        document.getElementById("client-info-last-seen").innerText = (stored_client.last_seen > 0) ? UI.format_time_ago(stored_client.last_seen) : "no data available";
+
+        document.getElementById("client-info-connected").innerText = "";
+        document.getElementById("client-info-ip").innerText = "";
+        document.getElementById("client-info-country").innerText = "";
+        document.getElementById("client-info-last-action").innerText = "";
+        document.getElementById("client-info-identity").innerText = "";
+
+        document.getElementById("client-info-container").style.display = "block";
+    },
+
+    /**
+     * @brief formats a timestamp as elapsed time, such as five minutes ago
+     *
+     * @param number unix_seconds -> the moment, in seconds
+     *
+     * @return string the text
+     */
+    format_time_ago: function(unix_seconds)
+    {
+        let seconds_ago = Math.floor(new Date().valueOf() / 1000) - unix_seconds;
+
+        // clock skew between server and phone can put it slightly in the future
+        if (seconds_ago < 0)
+        {
+            seconds_ago = 0;
+        }
+
+        if (seconds_ago < 60)
+        {
+            return "just now";
+        }
+
+        // elapsed time units use average month and year lengths
+        let units = [
+            { seconds: 60, name: "minute" },
+            { seconds: 3600, name: "hour" },
+            { seconds: 86400, name: "day" },
+            { seconds: 604800, name: "week" },
+            { seconds: 2629800, name: "month" },
+            { seconds: 31557600, name: "year" }
+        ];
+
+        let chosen = units[0];
+        for (let i = 0; i < units.length; i++)
+        {
+            if (seconds_ago >= units[i].seconds)
+            {
+                chosen = units[i];
+            }
+        }
+
+        let count = Math.floor(seconds_ago / chosen.seconds);
+        return count + " " + chosen.name + ((count == 1) ? "" : "s") + " ago";
+    },
+
+    /**
+     * @brief builds avatar initials from a display name
+     *
+     * @param string name -> the name
+     *
+     * @return string one or two capital letters, "?" for an empty name
+     */
+    initials_for_name: function(name)
+    {
+        let trimmed = ("" + name).trim();
+        if (trimmed.length == 0)
+        {
+            return "?";
+        }
+
+        let words = trimmed.split(/[\s._-]+/).filter(function(word)
+        {
+            return word.length > 0;
+        });
+
+        if (words.length >= 2)
+        {
+            return (words[0].charAt(0) + words[1].charAt(0)).toUpperCase();
+        }
+
+        return trimmed.substring(0, 2).toUpperCase();
+    },
+
+    /**
+     * @brief creates the shared client information window
+     */
+    show_client_info_popup_shell: function()
+    {
+        if (document.getElementById("client-info-extra-rows") != null)
+        {
+            return;
+        }
+
+        let content = document.getElementById("client-info-content");
+        let extra_rows = document.createElement("div");
+        extra_rows.id = "client-info-extra-rows";
+        extra_rows.innerHTML = "<p class='client-info-row'><span class='client-info-label'>status</span><span id='client-info-status'></span></p>" + "<p class='client-info-row' data-server-groups><span class='client-info-label'>server groups</span><span id='client-info-groups'></span></p>" + "<p class='client-info-row'><span class='client-info-label'>last seen</span><span id='client-info-last-seen'></span></p>";
+        content.insertBefore(extra_rows, content.children[1]);
+    },
+
+    /**
+     * @brief enables the chosen stylesheet and updates theme dependent controls
+     *
+     * @param string themename -> the theme
+     * @param boolean persist -> false leaves localStorage alone
+     *
+     * @return void
+     */
+    apply_theme: function(themename, persist)
+    {
+        let sheet_id = "style-theme-" + (themename == "light-theme" ? "light" : themename);
+
+        if (document.getElementById(sheet_id) == null)
+        {
+            sheet_id = "style-theme-default";
+            themename = "default";
+        }
+
+        let sheets = document.getElementsByClassName("style-theme-html-element");
+        for (let i = 0; i < sheets.length; i++)
+        {
+            sheets[i].setAttribute("media", "(max-width: 1px)");
+        }
+        document.getElementById(sheet_id).removeAttribute("media");
+        voice__update_microphone_button();
+        if (typeof member_conversations__apply_theme === "function")
+        {
+            member_conversations__apply_theme();
+        }
+        groups__apply_theme_access(themename);
+        chat__apply_theme_formatting();
+        theme_effects__refresh();
+
+        // update the connection form layout for the selected theme
+        if (typeof connection__apply_connect_window_mode === "function")
+        {
+            connection__apply_connect_window_mode();
+        }
+
+        // maintain the member list mirror only when the theme displays it
+        UI.refresh_member_list_state();
+        UI.refresh_member_list_controls();
+
+        // save user theme choices. server defaults pass persist=false
+        if (persist !== false)
+        {
+            utils__storage_set("lemon_theme", themename);
+        }
+    },
+
+    /**
+     * @brief maintains the cloned member list only while the active theme displays it
+     *
+     * @return void
+     */
+    refresh_member_list_state: function()
+    {
+        let container = document.getElementById("member-list-container");
+        if (container == null)
+        {
+            return;
+        }
+
+        let is_visible = getComputedStyle(container).display != "none";
+
+        // load avatars when the visible member list and server policy allow them
+        let grid_now_visible = (is_visible == true && g_server_policy.is_avatar_upload_allowed == true);
+        let grid_just_appeared = (grid_now_visible == true && g_avatar.grid_visible == false);
+        g_avatar.grid_visible = grid_now_visible;
+
+        if (is_visible == true)
+        {
+            if (member_list_observer == null)
+            {
+                member_list_observer = new MutationObserver(function()
+                {
+                    UI.schedule_member_list_sync();
+                });
+            }
+
+            let tree = document.getElementById("channel-list-container");
+            if (tree != null)
+            {
+                member_list_observer.observe(tree, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "value"] });
+            }
+
+            // watch idle rows too so departed clients disappear from the member list
+            let idle_container = document.getElementById("idle-clients-container");
+            if (idle_container != null)
+            {
+                member_list_observer.observe(idle_container, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "value"] });
+            }
+
+            UI.sync_member_list();
+
+            // switching into a member list theme after connect: pull every avatar for the grid now
+            if (grid_just_appeared == true)
+            {
+                channel_tree__enqueue_all_avatars_for_loading();
+            }
+        }
+        else
+        {
+            if (member_list_observer != null)
+            {
+                member_list_observer.disconnect();
+            }
+
+            let body = document.getElementById("member-list-body");
+            if (body != null)
+            {
+                body.innerHTML = "";
+            }
+            let header = document.getElementById("member-list-header");
+            if (header != null)
+            {
+                header.textContent = "";
+            }
+        }
+    },
+
+    /**
+     * @brief updates the participant filter
+     */
+    refresh_member_list_controls: function()
+    {
+        let neighbors = document.body.classList.contains("msgr-neighbors-only");
+        let toggle = document.getElementById("msgr-neighbors-button");
+
+        // update the filter button
+        if (toggle != null)
+        {
+            toggle.value = "";
+            toggle.title = neighbors ? "Show all known server users" : "Show people in this channel";
+            toggle.setAttribute("aria-label", toggle.title);
+            toggle.setAttribute("aria-pressed", neighbors ? "true" : "false");
+        }
+    },
+
+    /**
+     * @brief schedules one member list refresh per animation frame
+     *
+     * @return void
+     */
+    schedule_member_list_sync: function()
+    {
+        if (member_list_sync_scheduled == true)
+        {
+            return;
+        }
+        member_list_sync_scheduled = true;
+        requestAnimationFrame(function()
+        {
+            member_list_sync_scheduled = false;
+            UI.sync_member_list();
+        });
+    },
+
+    /**
+     * @brief rebuilds member rows as clones without duplicate IDs or editable username fields
+     *
+     * @return void
+     */
+    sync_member_list: function()
+    {
+        let body = document.getElementById("member-list-body");
+        let header = document.getElementById("member-list-header");
+        if (body == null)
+        {
+            console.warn("sync_member_list: member-list-body missing; skipping");
+            return;
+        }
+
+        let tree = document.getElementById("channel-list-container");
+        // include idle clients from their separate container
+        let rows = document.querySelectorAll("#channel-list-container .connected-client, #idle-clients-container .connected-client");
+
+        let previous_scroll = body.scrollTop;
+        let previous_scroll_left = body.scrollLeft;
+        let previous_channel = body.querySelector(".member-list-channel");
+        let changed_channel = previous_channel != null && previous_channel.getAttribute("data-member-list-channel-id") != String(g_current_channel_id);
+        let changed_conversation = previous_channel != null && previous_channel.getAttribute("data-member-list-conversation-id") != String(g_current_chat_context_id);
+        let focused_row = document.activeElement.closest(".member-list-channel, .member-list-client");
+        let focused_channel_control = document.activeElement.matches(".member-conversations-channel-switch") ? ".member-list-channel-icon" : document.activeElement.matches(".member-list-channel-name[role='button']") ? ".member-list-channel-name" : null;
+        let focus_attribute = focused_row == null ? null : focused_row.hasAttribute("data-member-list-channel-id") ? "data-member-list-channel-id" : focused_row.hasAttribute("data-identity-hash") ? "data-identity-hash" : "data-connected-client-id";
+        let focus_value = focused_row == null ? null : focused_row.getAttribute(focus_attribute);
+        let fragment = document.createDocumentFragment();
+        let count = 0;
+
+        // mark the circle of the selected conversation
+        let active_is_pm = (g_current_chat_context_id != null && g_current_chat_context_id.indexOf("chat-context-pm-") == 0);
+        let active_pm_client_id = (active_is_pm == true) ? g_current_chat_context_id.split("chat-context-pm-")[1] : null;
+
+        // offline conversations select their saved identity circle
+        let active_is_offline = (g_current_chat_context_id != null && g_current_chat_context_id.indexOf("chat-context-offline-") == 0);
+        let active_offline_identity_hash = (active_is_offline == true) ? g_current_chat_context_id.substring("chat-context-offline-".length) : "";
+
+        // place the current channel first. main forwards its tap and hold actions
+        let current_channel_row = (tree != null) ? tree.querySelector('.single-channel[data-channel-id="' + g_current_channel_id + '"]') : null;
+        if (current_channel_row != null)
+        {
+            let channel_name_element = current_channel_row.querySelector("[data-channel-name-id]");
+
+            let channel_circle = document.createElement("div");
+            channel_circle.className = "member-list-channel";
+            channel_circle.setAttribute("data-member-list-channel-id", g_current_channel_id);
+            channel_circle.setAttribute("data-member-list-conversation-id", g_current_chat_context_id);
+            if (changed_channel || changed_conversation)
+            {
+                channel_circle.classList.add("member-list-channel-updated");
+            }
+            channel_circle.tabIndex = 0;
+            channel_circle.setAttribute("role", "button");
+            channel_circle.title = "Open channel chat. Hold or right click to choose a channel.";
+
+            if (active_is_pm == false && active_is_offline == false)
+            {
+                channel_circle.classList.add("member-list-context-active");
+            }
+
+            let channel_icon = document.createElement("div");
+            channel_icon.className = "member-list-channel-icon";
+
+            // use the uploaded channel icon or the theme's default glyph
+            let tree_icon = current_channel_row.querySelector(".single-channel-icon");
+            if (tree_icon != null && tree_icon.style.backgroundImage != "")
+            {
+                channel_icon.style.backgroundImage = tree_icon.style.backgroundImage;
+                channel_icon.classList.add("has-icon");
+            }
+
+            let channel_name = document.createElement("p");
+            channel_name.className = "member-list-channel-name";
+            channel_name.textContent = (channel_name_element != null) ? channel_name_element.textContent : "";
+
+            // show channel unread counts on its member list circle
+            let channel_unread = document.createElement("p");
+            let channel_unread_count = chat__get_channel_unread_count(g_current_channel_id);
+            channel_unread.className = "member-list-channel-unread" + ((channel_unread_count > 0) ? "" : " unread-empty");
+            channel_unread.textContent = channel_unread_count;
+
+            channel_circle.appendChild(channel_icon);
+            channel_circle.appendChild(channel_name);
+            channel_circle.appendChild(channel_unread);
+            fragment.appendChild(channel_circle);
+        }
+
+        for (let i = 0; i < rows.length; i++)
+        {
+            let clone = rows[i].cloneNode(true);
+
+            // ring the circle of the user whose private chat is on screen
+            if (active_is_pm == true && rows[i].getAttribute("data-connected-client-id") == active_pm_client_id)
+            {
+                clone.classList.add("member-list-context-active");
+            }
+
+            if (clone.hasAttribute("id"))
+            {
+                clone.removeAttribute("id");
+            }
+            let ided = clone.querySelectorAll("[id]");
+            for (let j = 0; j < ided.length; j++)
+            {
+                ided[j].removeAttribute("id");
+            }
+
+            clone.classList.remove("collapsed");
+            // give clones their own styling class on every refresh
+            clone.classList.add("member-list-client");
+            if (clone.classList.contains("music-bot-client"))
+            {
+                clone.removeAttribute("tabindex");
+                clone.removeAttribute("role");
+            }
+            else
+            {
+                clone.tabIndex = 0;
+                clone.setAttribute("role", "button");
+            }
+
+            // replace the local username input with display text
+            let inputs = clone.getElementsByTagName("input");
+            while (inputs.length > 0)
+            {
+                let inp = inputs[0];
+                let p = document.createElement("p");
+                p.className = "connected-client-p";
+                p.textContent = g_local_username || inp.value;
+                inp.parentNode.replaceChild(p, inp);
+            }
+
+            // apply the member list avatar without changing the source tree row
+            if (g_server_policy.is_avatar_upload_allowed == true)
+            {
+                let cid = rows[i].getAttribute("data-connected-client-id");
+                let client_object = (cid != null) ? channel_tree__get_client_by_client_id(cid) : null;
+                if (client_object != null && typeof client_object.base64_avatar === "string" && client_object.base64_avatar.length > 0)
+                {
+                    let circle = clone.querySelector(".client-audio-state");
+                    if (circle != null)
+                    {
+                        circle.style.backgroundImage = "url(" + client_object.base64_avatar + ")";
+                        circle.style.backgroundSize = "cover";
+                    }
+                }
+            }
+
+            // use display name initials when no avatar is available
+            let clone_circle = clone.querySelector(".client-audio-state");
+            if (clone_circle != null && clone_circle.style.backgroundImage == "")
+            {
+                let clone_name_element = clone.querySelector(".connected-client-p");
+                clone_circle.setAttribute("data-initials", UI.initials_for_name((clone_name_element != null) ? clone_name_element.textContent : ""));
+            }
+
+            // show each connected user's channel below their name
+            let caption_client_object = channel_tree__get_client_by_client_id(rows[i].getAttribute("data-connected-client-id"));
+            if (caption_client_object != null)
+            {
+                let caption_channel = channel_tree__get_channel_by_id(g_channel_list, caption_client_object.channel_id);
+                if (caption_channel != null)
+                {
+                    let channel_caption = document.createElement("p");
+                    channel_caption.className = "member-list-client-channel";
+                    channel_caption.textContent = caption_channel.name;
+                    clone.appendChild(channel_caption);
+                }
+
+                // mark users outside the current channel for the neighbor filter
+                if (parseInt(caption_client_object.channel_id) == parseInt(g_current_channel_id))
+                {
+                    clone.classList.add("in-current-channel");
+                }
+            }
+
+            let presence = document.createElement("span");
+            presence.className = "member-list-presence";
+            presence.textContent = clone.classList.contains("idle-client") ? "Idle" : clone.querySelector(".client-audio-state-microphone-active") != null ? "Talking" : clone.classList.contains("in-current-channel") ? "In this channel" : "Online";
+            clone.appendChild(presence);
+            fragment.appendChild(clone);
+            count++;
+        }
+
+        let offline_count = 0;
+
+        if (g_offline_client_list.length > 0)
+        {
+            let online_identities = new Set();
+            for (let i = 0; i < g_client_list.length; i++)
+            {
+                if (typeof g_client_list[i].identity_hash === "string" && g_client_list[i].identity_hash.length > 0)
+                {
+                    online_identities.add(g_client_list[i].identity_hash);
+                }
+            }
+
+            for (let i = 0; i < g_offline_client_list.length; i++)
+            {
+                let stored_client = g_offline_client_list[i];
+
+                if (online_identities.has(stored_client.identity_hash) == true)
+                {
+                    continue; // this person is connected, his live row is already listed
+                }
+
+                let row = document.createElement("div");
+                row.className = "connected-client member-list-client offline-contact";
+                row.tabIndex = 0;
+                row.setAttribute("role", "button");
+
+                // mark the selected offline conversation
+                if (active_is_offline == true && stored_client.identity_hash == active_offline_identity_hash)
+                {
+                    row.classList.add("member-list-context-active");
+                }
+
+                // keep the leading spacer so themes do not hide the avatar instead
+                let indent_spacer = document.createElement("div");
+                indent_spacer.style.width = "0px";
+                indent_spacer.style.height = "1px";
+                indent_spacer.style.display = "inline-block";
+                row.appendChild(indent_spacer);
+
+                let circle = document.createElement("div");
+                circle.className = "client-audio-state";
+                if (g_server_policy.is_avatar_upload_allowed == true && stored_client.base64_avatar.length > 0)
+                {
+                    circle.style.backgroundImage = "url(" + stored_client.base64_avatar + ")";
+                    circle.style.backgroundSize = "cover";
+                }
+                else
+                {
+                    circle.setAttribute("data-initials", UI.initials_for_name(stored_client.username));
+                }
+                row.appendChild(circle);
+
+                let name = document.createElement("p");
+                name.className = "connected-client-p";
+                row.dataset.identityHash = stored_client.identity_hash;
+                name.textContent = stored_client.username;
+                row.appendChild(name);
+
+                let presence = document.createElement("span");
+                presence.className = "member-list-presence";
+                presence.textContent = stored_client.last_seen > 0 ? "Offline · last seen " + UI.format_time_ago(stored_client.last_seen) : "Offline";
+                row.appendChild(presence);
+
+                fragment.appendChild(row);
+                offline_count++;
+            }
+        }
+
+        body.innerHTML = "";
+        if (fragment.childNodes.length == 0)
+        {
+            let empty = document.createElement("div");
+            empty.id = "member-list-empty";
+            empty.textContent = "no one connected";
+            body.appendChild(empty);
+        }
+        else
+        {
+            body.appendChild(fragment);
+        }
+
+        body.scrollTop = previous_scroll;
+        body.scrollLeft = previous_scroll_left;
+        if (focus_attribute != null)
+        {
+            for (let row of body.children)
+            {
+                if (row.getAttribute(focus_attribute) == focus_value)
+                {
+                    let focus_target = focused_channel_control != null ? row.querySelector(focused_channel_control) : row;
+                    focus_target.tabIndex = 0;
+                    focus_target.focus({ preventScroll: true });
+                    break;
+                }
+            }
+        }
+        if (header != null)
+        {
+            header.textContent = "members — " + count;
+        }
+        if (typeof member_conversations__schedule_refresh === "function")
+        {
+            member_conversations__schedule_refresh();
+        }
+    },
+
+    /**
+     * @brief toggles flat channel indentation in themes that support it
+     *
+     * @return void
+     */
+    channel_flatten_toggle_onclick: function()
+    {
+        g_is_channel_list_flattened = !g_is_channel_list_flattened;
+        UI.apply_channel_flatten_state();
+        utils__storage_set("lemon_channels_flat", g_is_channel_list_flattened ? "1" : "0");
+    },
+
+    /**
+     * @brief updates the flat channel class and toggle state
+     *
+     * @return void
+     */
+    apply_channel_flatten_state: function()
+    {
+        let tree = document.getElementById("channel-list-container");
+        if (tree != null)
+        {
+            if (g_is_channel_list_flattened == true)
+            {
+                tree.classList.add("channels-flattened");
+            }
+            else
+            {
+                tree.classList.remove("channels-flattened");
+            }
+        }
+
+        let button = document.getElementById("channel-flatten-toggle-button");
+        if (button != null)
+        {
+            if (g_is_channel_list_flattened == true)
+            {
+                button.classList.add("flatten-active");
+            }
+            else
+            {
+                button.classList.remove("flatten-active");
+            }
+        }
+
+        // update the setting
+        let checkbox = document.getElementById("local-settings-flat-channel-list");
+        if (checkbox != null)
+        {
+            checkbox.checked = (g_is_channel_list_flattened == true);
+        }
+    },
+
+    /**
+     * @brief checks whether the theme is allowed on this device
+     *
+     * @param string themename -> the theme
+     *
+     * @return boolean true when allowed. an unknown name is allowed on desktop and rejected on a phone
+     */
+    is_theme_allowed_on_this_device: function(themename)
+    {
+        if (!g_is_client_running_under_touch_device)
+        {
+            return true;
+        }
+
+        let theme_items = document.getElementsByClassName("choose-theme-item");
+        for (let i = 0; i < theme_items.length; i++)
+        {
+            if (theme_items[i].getAttribute("data-name") === themename)
+            {
+                return theme_items[i].getAttribute("data-mobile") === "true";
+            }
+        }
+        return false;
+    },
+
+    /**
+     * @brief applies and saves the selected theme
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    choose_theme_item_onclick: function(event)
+    {
+        event.stopPropagation();
+        UI.close_theme_menu();
+        UI.apply_theme(event.currentTarget.getAttribute("data-name"));
+    },
+
+    /**
+     * @brief toggles chat visibility and updates the current layout
+     *
+     * @return void
+     */
+    hide_chat_container: function()
+    {
+        if (g_is_client_running_under_touch_device)
+        {
+            if (g_is_chat_hidden == false)
+            {
+                document.getElementById("space-devider2").style.display = "none";
+                document.getElementById("space-devider1").style.width = "100%";
+                document.getElementById("space-devider4").style.display = "none";
+                document.getElementById("hide-chat-button").style.backgroundImage = "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2RpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDpERDc0QzMwNzA5MjA2ODExQTRFMEQzRDI2RDUyMTgzQyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozRjA1RkVDNEZDMjIxMUUwQUE3NEQwMjJDRUE1NTVGNyIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozRjA1RkVDM0ZDMjIxMUUwQUE3NEQwMjJDRUE1NTVGNyIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IFdpbmRvd3MiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDoxRjhEQ0Y5MDhFRjNFMDExQTE2NUI2RjQzNUVGQkUzNyIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDpERDc0QzMwNzA5MjA2ODExQTRFMEQzRDI2RDUyMTgzQyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PieHf0QAAANvSURBVHja7FbfS1NRHD+7G9PpcAoOJ9Nhom4urg7aY6A4CqHnKIii8D8o6imIpF4SfTSEQhBMXw0mIxwkBD35A6bTKBR/TMTBdOoczk37fE/3rKtOSXSshx343nPO93vO+Xzu98e5V3N0dMRy2SSW45YnkCeQJ5AnkHMCurGxsdx7oKCggFVWVrKioqKsAwosvV7/xwP0sNvt10pLS9sPDw/HZ2ZmgltbW1kBNxqNzOVy2SRJulNeXv45EAiEuAfwRexH1wvDVH19fZtGo8kKAYfDcQMYPwlLq9UOpEOwtLSUUD7LeoPB0FddXa3Pguu1y8vLg5FIhJ+NsTFNYHt7uzMUCqWUtXU1NTXPLRbLhQAofxBKptPpMtpTqZQVYX67sLDgCwaDDEQ61WX4bXFxsQdKsf5NQ0NDB8LB4Kp/Am9ubnZWVFT0ozcLErSXko7m0MfxUi3on8Xj8bswezkBJB4jAcOXSEDf5uYmU3QfcGCv2+02wSOspKRE6E9JVVWVDLCvGD9GCP2yLJsJHMRMyWTSRnPSw95B66xW6y+xV+Pz+dQvYwDbL3jzm2azWejILR+J8cHBwTgRxKEsFotR8vJxNBodaGpqelhcXCz2BGD3zM/P25F4P6D3QyeTgfYh+z8lEokHNNeMjo6e9KgJ0odN92praxnipraFIcQ4SiAUWtIhob6vra35QUJW3SVkvw8ZFuB7e3sEHgS4B9N1TsDr9Z4VWhfkHYjcKisrYyaTiQvKKNPaVyDxPgOJdBPg8GIanF9EFIcz2jTk9s7OjgvSjnELwNtwOC8jcrfqvnhNrkU4PMhwPy4bWU2UQjU3Nxfc398/Bs49MDIycpFq0wt3Kh5Sl0gA+TOBhKsDySllbboK4QE3knwaHjj+MTrHA5laAjKhjCeOHYRSczqdZpTdMCrq5EWmhX6wsbHRMzs7u64mIZ1VWhcRKjkCLywspFKTSbe7u8smJyd5r6xzkh0kLLRe7JUoPpcVm812CpwSDnlxHX3gJAmst4i9EtzFLisrKyvdSDCZxkhYDo55K+Y88YgE6cmOuXN1dbVb7L2SPyIkWBcSLLyxscEQYyq1VuXO4HcHlR7pw+Ew2SPwTFe6CoaGhq7qg0fV8RTyQgWubnS1dkN6lBL/+0NyRY1uvifn2InUo//up/S3AAMAiJlus3so8OYAAAAASUVORK5CYII=)";
+                g_is_chat_hidden = true;
+            }
+            else
+            {
+                document.getElementById("space-devider2").style.display = "inline-block";
+                document.getElementById("space-devider4").style.display = "inline-block";
+                document.getElementById("space-devider1").style.width = "30%";
+                document.getElementById("space-devider2").style.width = "100%";
+                document.getElementById("hide-chat-button").style.backgroundImage = "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2RpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDpERDc0QzMwNzA5MjA2ODExQTRFMEQzRDI2RDUyMTgzQyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDo5MkQ4RDIzRUYzOEUxMUUwOTZDOEQ1RTU1NDQ3N0RBMSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDo5MkQ4RDIzREYzOEUxMUUwOTZDOEQ1RTU1NDQ3N0RBMSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IFdpbmRvd3MiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo5N0U1MkY5MjhFRjNFMDExQTE2NUI2RjQzNUVGQkUzNyIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDpERDc0QzMwNzA5MjA2ODExQTRFMEQzRDI2RDUyMTgzQyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PuSt+6UAAASASURBVHja7FddSFtXHD/xxu9oNBq5Or1Svy0G5joLwsbGoEVxT6W1sD2VwQp9LKwMCn0rfZCWCWMwYaxQkIqZb4JMJx2DjRUigWikLihGo9H4gRqNRqP7/e7OtWmWalc2wqAHfjn3fPw/zv/rnJiOjo5EKpvpjQKpVsA8MjKSUgXSRIqb+Z8SZGZmivT0dL3PyMjQ56LRqNjb2xP7+/t6/68qkJaWJgoLC4XNZtP7rKysM5i2AW8BqtwWBALA2u7u7sz6+rpYW1sT7A8PD19PAbPZLDRNE6qqWvD9EabagA5AO4khFPSXlpYOAkMHBwejwWAwPDc3p1snaRYMDw//bbKiooLC7YqifInhZ4D1ZQKXlpbE5uamKC4u1i2U0DaA72KxWJff7w9SkRMVoF8bGhoUq9X6BYa3AYuxRlPSHfFtenpazM/PP8Tnb8DlxsbGC3a7PdneMHAXinZNTk7G4uPkeJfFYhHNzc0ahD/B8J4hnL4cHx8XqBeRRO1DodAtdNeAHuDi8vJyH+exN0oa0hrsyTM/P/8XysjLy3uuAAsRT+5wOM4hun/H+D3OwWwC2gqPxzMEV3yME8U4Hw/QORPGveyxN0oa0k5MTOj+l3taKaOpqek8Zep7+VNTU6OB4Cd8qxzv7OyIsbGxCPz7KcbtCCwrekuiAtXV1VpOTo7+Dcsxds7INYukaYeVrrhcrg00g06FrB+rqqo0js38yc3N/RZ+0wON/gGBDxa4hKFHWqo+WTplZ2d/A5NewacXYKbcidtXL8u8MxKJuNxu9+OWlhb95AxquPwrrF8ykwCB1MqUk+kXgAnfhdk2DE5gkPGSfD4LTCRbSKCZgeAPwfsPzLF+iEAg8IEerNRydna2OxwO69FLE1VWVr5g7tXV1RnGBNdfBdxLmnge4Gkjb65TFmR+rceAJLg7NTXllQyUoqKi+wUFBccMcZqhxcXF2KsqwL2kMcbkRZ7kzTFkeSjz2AJMGwTJdQSMweQqAqyDqSnX/T6fr2dra+tU4dzDvaQhLXmQF3lynYULsm5QJteVzs7OYyGo3e9A23qWYZPJ1AatnyAWAtI9o8jzDkS3CojEjCBWVlaE1+t143RX4eaDkpISUVtbex4x9QPWs7e3t5naj7DebdCYBgYG4mPHimD5ta6u7qwsFqxgt0DYQ7OisFhQ379H6l2GcvqtyMY8h8+Zvk4ofw0XV7isrEzBvs+xfJ8Jw9SGch7cnO/LEv1XKXY6nYkBrOH0j8vLy1sBWoJzbqAbGASjEMzsYOmFn1WZjrwNnVDaA6F2eWndBByyYrJs0+/t8tZ8fhf09/cnyyKFOQ3/3UZxURhEcc0jaz/bMyPnZd9qCGXjdbywsMDLqhfD69KiL15GfX19J92uZHgHD4823nY0O4PqpMZ4YSwQcM0gprqAn1/3QcKTtsNvKk7yCYHxOVRO/b0gq5pePREbgkGG9hTolQid+iI67cUS9+J5IKEgBt6Wb4Qaue6TgcVYif2nb0IpwCW/R//3r+KUK/Dmr1nKFfhTgAEA1AVXSbHzbjUAAAAASUVORK5CYII=)";
+                g_is_chat_hidden = false;
+            }
+        }
+        else
+        {
+            if (g_is_chat_hidden == false)
+            {
+                // the grid applies visibility after the chat flag changes
+                document.getElementById("hide-chat-button").style.backgroundImage = "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2RpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDpERDc0QzMwNzA5MjA2ODExQTRFMEQzRDI2RDUyMTgzQyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDozRjA1RkVDNEZDMjIxMUUwQUE3NEQwMjJDRUE1NTVGNyIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDozRjA1RkVDM0ZDMjIxMUUwQUE3NEQwMjJDRUE1NTVGNyIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IFdpbmRvd3MiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDoxRjhEQ0Y5MDhFRjNFMDExQTE2NUI2RjQzNUVGQkUzNyIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDpERDc0QzMwNzA5MjA2ODExQTRFMEQzRDI2RDUyMTgzQyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PieHf0QAAANvSURBVHja7FbfS1NRHD+7G9PpcAoOJ9Nhom4urg7aY6A4CqHnKIii8D8o6imIpF4SfTSEQhBMXw0mIxwkBD35A6bTKBR/TMTBdOoczk37fE/3rKtOSXSshx343nPO93vO+Xzu98e5V3N0dMRy2SSW45YnkCeQJ5AnkHMCurGxsdx7oKCggFVWVrKioqKsAwosvV7/xwP0sNvt10pLS9sPDw/HZ2ZmgltbW1kBNxqNzOVy2SRJulNeXv45EAiEuAfwRexH1wvDVH19fZtGo8kKAYfDcQMYPwlLq9UOpEOwtLSUUD7LeoPB0FddXa3Pguu1y8vLg5FIhJ+NsTFNYHt7uzMUCqWUtXU1NTXPLRbLhQAofxBKptPpMtpTqZQVYX67sLDgCwaDDEQ61WX4bXFxsQdKsf5NQ0NDB8LB4Kp/Am9ubnZWVFT0ozcLErSXko7m0MfxUi3on8Xj8bswezkBJB4jAcOXSEDf5uYmU3QfcGCv2+02wSOspKRE6E9JVVWVDLCvGD9GCP2yLJsJHMRMyWTSRnPSw95B66xW6y+xV+Pz+dQvYwDbL3jzm2azWejILR+J8cHBwTgRxKEsFotR8vJxNBodaGpqelhcXCz2BGD3zM/P25F4P6D3QyeTgfYh+z8lEokHNNeMjo6e9KgJ0odN92praxnipraFIcQ4SiAUWtIhob6vra35QUJW3SVkvw8ZFuB7e3sEHgS4B9N1TsDr9Z4VWhfkHYjcKisrYyaTiQvKKNPaVyDxPgOJdBPg8GIanF9EFIcz2jTk9s7OjgvSjnELwNtwOC8jcrfqvnhNrkU4PMhwPy4bWU2UQjU3Nxfc398/Bs49MDIycpFq0wt3Kh5Sl0gA+TOBhKsDySllbboK4QE3knwaHjj+MTrHA5laAjKhjCeOHYRSczqdZpTdMCrq5EWmhX6wsbHRMzs7u64mIZ1VWhcRKjkCLywspFKTSbe7u8smJyd5r6xzkh0kLLRe7JUoPpcVm812CpwSDnlxHX3gJAmst4i9EtzFLisrKyvdSDCZxkhYDo55K+Y88YgE6cmOuXN1dbVb7L2SPyIkWBcSLLyxscEQYyq1VuXO4HcHlR7pw+Ew2SPwTFe6CoaGhq7qg0fV8RTyQgWubnS1dkN6lBL/+0NyRY1uvifn2InUo//up/S3AAMAiJlus3so8OYAAAAASUVORK5CYII=)";
+                g_is_chat_hidden = true;
+            }
+            else
+            {
+                // panel visibility and column sizes come back via layout__layout_apply() below
+                document.getElementById("hide-chat-button").style.backgroundImage = "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAA2RpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMC1jMDYwIDYxLjEzNDc3NywgMjAxMC8wMi8xMi0xNzozMjowMCAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iIHhtcE1NOk9yaWdpbmFsRG9jdW1lbnRJRD0ieG1wLmRpZDpERDc0QzMwNzA5MjA2ODExQTRFMEQzRDI2RDUyMTgzQyIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDo5MkQ4RDIzRUYzOEUxMUUwOTZDOEQ1RTU1NDQ3N0RBMSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDo5MkQ4RDIzREYzOEUxMUUwOTZDOEQ1RTU1NDQ3N0RBMSIgeG1wOkNyZWF0b3JUb29sPSJBZG9iZSBQaG90b3Nob3AgQ1M1IFdpbmRvd3MiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDo5N0U1MkY5MjhFRjNFMDExQTE2NUI2RjQzNUVGQkUzNyIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDpERDc0QzMwNzA5MjA2ODExQTRFMEQzRDI2RDUyMTgzQyIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/PuSt+6UAAASASURBVHja7FddSFtXHD/xxu9oNBq5Or1Svy0G5joLwsbGoEVxT6W1sD2VwQp9LKwMCn0rfZCWCWMwYaxQkIqZb4JMJx2DjRUigWikLihGo9H4gRqNRqP7/e7OtWmWalc2wqAHfjn3fPw/zv/rnJiOjo5EKpvpjQKpVsA8MjKSUgXSRIqb+Z8SZGZmivT0dL3PyMjQ56LRqNjb2xP7+/t6/68qkJaWJgoLC4XNZtP7rKysM5i2AW8BqtwWBALA2u7u7sz6+rpYW1sT7A8PD19PAbPZLDRNE6qqWvD9EabagA5AO4khFPSXlpYOAkMHBwejwWAwPDc3p1snaRYMDw//bbKiooLC7YqifInhZ4D1ZQKXlpbE5uamKC4u1i2U0DaA72KxWJff7w9SkRMVoF8bGhoUq9X6BYa3AYuxRlPSHfFtenpazM/PP8Tnb8DlxsbGC3a7PdneMHAXinZNTk7G4uPkeJfFYhHNzc0ahD/B8J4hnL4cHx8XqBeRRO1DodAtdNeAHuDi8vJyH+exN0oa0hrsyTM/P/8XysjLy3uuAAsRT+5wOM4hun/H+D3OwWwC2gqPxzMEV3yME8U4Hw/QORPGveyxN0oa0k5MTOj+l3taKaOpqek8Zep7+VNTU6OB4Cd8qxzv7OyIsbGxCPz7KcbtCCwrekuiAtXV1VpOTo7+Dcsxds7INYukaYeVrrhcrg00g06FrB+rqqo0js38yc3N/RZ+0wON/gGBDxa4hKFHWqo+WTplZ2d/A5NewacXYKbcidtXL8u8MxKJuNxu9+OWlhb95AxquPwrrF8ykwCB1MqUk+kXgAnfhdk2DE5gkPGSfD4LTCRbSKCZgeAPwfsPzLF+iEAg8IEerNRydna2OxwO69FLE1VWVr5g7tXV1RnGBNdfBdxLmnge4Gkjb65TFmR+rceAJLg7NTXllQyUoqKi+wUFBccMcZqhxcXF2KsqwL2kMcbkRZ7kzTFkeSjz2AJMGwTJdQSMweQqAqyDqSnX/T6fr2dra+tU4dzDvaQhLXmQF3lynYULsm5QJteVzs7OYyGo3e9A23qWYZPJ1AatnyAWAtI9o8jzDkS3CojEjCBWVlaE1+t143RX4eaDkpISUVtbex4x9QPWs7e3t5naj7DebdCYBgYG4mPHimD5ta6u7qwsFqxgt0DYQ7OisFhQ379H6l2GcvqtyMY8h8+Zvk4ofw0XV7isrEzBvs+xfJ8Jw9SGch7cnO/LEv1XKXY6nYkBrOH0j8vLy1sBWoJzbqAbGASjEMzsYOmFn1WZjrwNnVDaA6F2eWndBByyYrJs0+/t8tZ8fhf09/cnyyKFOQ3/3UZxURhEcc0jaz/bMyPnZd9qCGXjdbywsMDLqhfD69KiL15GfX19J92uZHgHD4823nY0O4PqpMZ4YSwQcM0gprqAn1/3QcKTtsNvKk7yCYHxOVRO/b0gq5pePREbgkGG9hTolQid+iI67cUS9+J5IKEgBt6Wb4Qaue6TgcVYif2nb0IpwCW/R//3r+KUK/Dmr1nKFfhTgAEA1AVXSbHzbjUAAAAASUVORK5CYII=)";
+                g_is_chat_hidden = false;
+            }
+        }
+
+        // refresh the desktop grid. touch layouts ignore this call
+        layout__layout_apply();
+        main__sync_toolbar_state_classes();
+    },
+
+    /**
+     * @brief closes the channel password dialog and its overlay
+     *
+     * @return void
+     */
+    enter_channel_password_closebutton_onclick: function()
+    {
+        document.getElementById("channel-password-enter-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+    },
+
+    /**
+     * @brief closes the admin password dialog and its overlay
+     *
+     * @return void
+     */
+    close_admin_password_context_button: function()
+    {
+        document.getElementById("admin-password-enter-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+    },
+
+    /**
+     * @brief connects the channel dialog controls to functions inside the client module
+     */
+    setup_channel_properties_controls: function()
+    {
+        UI.wire_settings_delete_delegation();
+        document.getElementById("close-button").onclick = UI.channel_properties_closebutton_onclick;
+        document.getElementById("cancel-channel-button").onclick = UI.channel_properties_closebutton_onclick;
+        document.getElementById("create-channel-button").onclick = UI.create_channel_button_onclick;
+        document.getElementById("edit-channel-button").onclick = UI.edit_channel_button_onclick;
+        document.getElementById("channel-properties-type").onchange = UI.describe_channel_type;
+        document.getElementById("channel-properties-limit-clients-checkbox").onchange = UI.refresh_channel_limit_input_visibility;
+        document.getElementById("channel-properties-remove-password").onchange = UI.channel_password_removal_onchange;
+        for (let name of ["channel", "audio", "permissions"])
+        {
+            let tab = document.getElementById("channel-properties-tab-" + name);
+            tab.onclick = function()
+            {
+                UI.select_channel_properties_tab(name, false);
+            };
+            tab.onkeydown = UI.channel_properties_tab_onkeydown;
+        }
+        document.getElementById("channel-properties-icon-box").onclick = function()
+        {
+            if (g_channel_properties_edit_channel_id != null)
+            {
+                UI.open_channel_icon_picker(g_channel_properties_edit_channel_id);
+            }
+        };
+        document.getElementById("channel-properties-icon-remove-button").onclick = function()
+        {
+            if (g_channel_properties_edit_channel_id != null)
+            {
+                UI.send_set_channel_icon_request(g_channel_properties_edit_channel_id, "none");
+            }
+        };
+        document.getElementById("channel-properties-edit").onkeydown = function(event)
+        {
+            if (event.key === "Escape")
+            {
+                event.preventDefault();
+                event.stopPropagation();
+                UI.channel_properties_closebutton_onclick();
+            }
+            else if (event.key === "Enter" && !event.isComposing && event.target.matches('input[type="text"], input[type="number"], input[type="password"]'))
+            {
+                event.preventDefault();
+                event.stopPropagation();
+                if (g_channel_properties_edit_channel_id == null)
+                {
+                    UI.create_channel_button_onclick();
+                }
+                else
+                {
+                    UI.edit_channel_button_onclick();
+                }
+            }
+        };
+    },
+
+    /**
+     * @brief closes the create/edit channel dialog and its background overlay
+     *
+     * @return void
+     */
+    channel_properties_closebutton_onclick: function()
+    {
+        UI.close_group_icon_picker();
+        document.getElementById("channel-properties-edit-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+    },
+
+    /**
+     * @brief validates and sends the edited channel settings, then clears the dialog
+     *
+     * @return void
+     */
+    edit_channel_button_onclick: function()
+    {
+        if (G_HAS_DOM == false)
+        {
+            return;
+        }
+        if (!UI.validate_channel_general_inputs())
+        {
+            return;
+        }
+        let parent_channel_id = document.getElementById("create-channel-hidden-parent-id").value;
+        let channel_name = document.getElementById("channel-properties-input-channel-name").value;
+
+        if (channel_name.length == 0)
+        {
+            utils__custom_alert("empty channel name ?");
+            return;
+        }
+
+        let channel_description = document.getElementById("channel-properties-input-channel-description").value;
+        let channel_password = document.getElementById("channel-properties-input-channel-password").value;
+        let is_audio_enabled = document.getElementById("channel-properties-enable-audio-checkbox").checked;
+        let is_client_limit_active = document.getElementById("channel-properties-limit-clients-checkbox").checked;
+        let max_client_count = parseInt(document.getElementById("channel-properties-input-max-clients").value);
+        if (isNaN(max_client_count) || max_client_count < 1)
+        {
+            max_client_count = 0;
+        }
+
+        let message_object = {
+            message: {
+                type: "edit_channel_request",
+                channel_id: parseInt(g_selected_channel_id),
+                channel_name: channel_name,
+                channel_description: channel_description,
+                is_audio_enabled: is_audio_enabled,
+                is_video_stream_enabled: document.getElementById("channel-properties-enable-video-checkbox").checked,
+                is_client_limit_active: is_client_limit_active,
+                max_client_count: max_client_count
+            }
+        };
+
+        let type = document.getElementById("channel-properties-type");
+        if (!type.disabled && type.value !== type.dataset.originalValue)
+        {
+            message_object.message.is_temp_channel = type.value === "temporary";
+        }
+        let powers = UI.read_channel_power_inputs();
+        if (!powers)
+        {
+            return;
+        }
+        Object.assign(message_object.message, powers);
+        if (document.getElementById("channel-properties-remove-password").checked)
+        {
+            message_object.message.channel_password = "";
+        }
+        else if (channel_password.length > 0)
+        {
+            message_object.message.channel_password = channel_password;
+        }
+        connection__send_message_object(message_object);
+
+        document.getElementById("channel-properties-edit-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+        document.getElementById("channel-properties-input-channel-name").value = "";
+        document.getElementById("channel-properties-input-channel-description").value = "";
+        document.getElementById("channel-properties-input-channel-password").value = "";
+    },
+
+    /**
+     * @brief validates and creates a channel under the selected parent
+     *
+     * @return void
+     */
+    create_channel_button_onclick: function()
+    {
+        if (G_HAS_DOM == false)
+        {
+            return;
+        }
+
+        if (!UI.validate_channel_general_inputs())
+        {
+            return;
+        }
+        let parent_channel_id = parseInt(document.getElementById("create-channel-hidden-parent-id").value);
+        let channel_name = document.getElementById("channel-properties-input-channel-name").value;
+
+        if (channel_name.length == 0)
+        {
+            utils__custom_alert("empty channel name ?");
+            return;
+        }
+
+        let channel_description = document.getElementById("channel-properties-input-channel-description").value;
+        let channel_password = document.getElementById("channel-properties-input-channel-password").value;
+        let is_audio_enabled = document.getElementById("channel-properties-enable-audio-checkbox").checked;
+        let is_client_limit_active = document.getElementById("channel-properties-limit-clients-checkbox").checked;
+        let max_client_count = parseInt(document.getElementById("channel-properties-input-max-clients").value);
+        if (isNaN(max_client_count) || max_client_count < 1)
+        {
+            max_client_count = 0;
+        }
+
+        let message_object = {
+            message: {
+                type: "create_channel_request",
+                channel_name: channel_name,
+                channel_description: channel_description,
+                channel_password: channel_password,
+                parent_channel_id: parent_channel_id,
+                is_audio_enabled: is_audio_enabled,
+                is_video_stream_enabled: document.getElementById("channel-properties-enable-video-checkbox").checked,
+                is_client_limit_active: is_client_limit_active,
+                max_client_count: max_client_count
+            }
+        };
+
+        let powers = UI.read_channel_power_inputs();
+        if (!powers)
+        {
+            return;
+        }
+        Object.assign(message_object.message, powers);
+        // do not log request bodies: some contain passwords or private content
+
+        connection__send_message_object(message_object);
+
+        document.getElementById("channel-properties-edit-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+        document.getElementById("channel-properties-input-channel-name").value = "";
+        document.getElementById("channel-properties-input-channel-description").value = "";
+        document.getElementById("channel-properties-input-channel-password").value = "";
+    },
+
+    /**
+     * @brief shows maximum clients only while the channel limit is enabled
+     *
+     * @return void
+     */
+    refresh_channel_limit_input_visibility: function()
+    {
+        let checked = document.getElementById("channel-properties-limit-clients-checkbox").checked;
+        document.getElementById("channel-properties-input-max-clients").style.display = checked ? "inline-block" : "none";
+    },
+
+    /**
+     * @brief clears the password field and offers removal only when a password is set
+     *
+     * @param has_password -> whether the existing channel has a password
+     */
+    set_channel_password_inputs: function(has_password)
+    {
+        let input = document.getElementById("channel-properties-input-channel-password");
+        input.value = "";
+        input.disabled = false;
+        input.placeholder = has_password ? "unchanged" : "";
+        input.title = has_password ? "Enter a new password to replace it. Leave this empty to keep the current password." : "";
+        document.getElementById("channel-properties-remove-password").checked = false;
+        document.getElementById("channel-properties-remove-password-label").hidden = !has_password;
+    },
+
+    /**
+     * @brief prevents entering a replacement password while removal is selected
+     */
+    channel_password_removal_onchange: function()
+    {
+        document.getElementById("channel-properties-input-channel-password").disabled = document.getElementById("channel-properties-remove-password").checked;
+    },
+
+    /**
+     * @brief shows the first invalid channel detail or client limit before saving
+     *
+     * @return boolean -> whether the name and optional client limit are valid
+     */
+    validate_channel_general_inputs: function()
+    {
+        let name = document.getElementById("channel-properties-input-channel-name");
+        let limit = document.getElementById("channel-properties-input-max-clients");
+        let limited = document.getElementById("channel-properties-limit-clients-checkbox").checked;
+        limit.required = limited;
+        for (let input of limited ? [name, limit] : [name])
+        {
+            if (!input.checkValidity())
+            {
+                UI.select_channel_properties_tab("channel", false);
+                input.focus();
+                input.reportValidity();
+                return false;
+            }
+        }
+        return true;
+    },
+
+    /**
+     * @brief fills the channel's sending, viewing and creation power requirements
+     *
+     * @param channel -> channel being edited, or null for a new channel
+     *
+     * @return void
+     */
+    set_channel_power_inputs: function(channel)
+    {
+        for (let action of ["talk", "stream", "message", "picture", "file", "view", "create"])
+        {
+            document.getElementById("channel-properties-required-" + action + "-power").value = channel ? Number(channel["required_" + action + "_power"]) || 0 : 0;
+        }
+        let temporary = channel ? channel.is_temp_channel === true : !groups__has_permission("create_channel");
+        let type = document.getElementById("channel-properties-type");
+        type.value = temporary ? "temporary" : "permanent";
+        type.dataset.originalValue = type.value;
+        let root = channel && channel.is_root_channel === true;
+        let password = document.getElementById("channel-properties-input-channel-password");
+        password.disabled = root;
+        if (root)
+        {
+            password.title = "The root channel cannot have a password.";
+        }
+        document.getElementById("channel-properties-remove-password").disabled = root;
+        let limit = document.getElementById("channel-properties-limit-clients-checkbox");
+        limit.disabled = root;
+        limit.title = root ? "The root channel uses the server's client limit." : "";
+        document.getElementById("channel-properties-input-max-clients").disabled = root;
+        moderation.channel_edit = channel ? Number(channel.channel_id) : null;
+        moderation__channel_fields(moderation.channel_edit);
+        if (channel)
+        {
+            moderation__send("channel_access_request", { channel_id: Number(channel.channel_id) });
+        }
+        UI.select_channel_properties_tab("channel", false);
+    },
+
+    /**
+     * @brief applies the channel conversion rights returned by the server
+     *
+     * @param number|null channel_id -> edited channel ID, or null for a new channel
+     */
+    refresh_channel_type_options: function(channel_id)
+    {
+        let type = document.getElementById("channel-properties-type");
+        let access = channel_id == null ? null : moderation.channels.get(Number(channel_id));
+        let current = type.dataset.originalValue;
+        if (access && typeof access.is_temp_channel === "boolean")
+        {
+            current = access.is_temp_channel ? "temporary" : "permanent";
+            if (current !== type.dataset.originalValue)
+            {
+                type.value = current;
+                type.dataset.originalValue = current;
+            }
+        }
+        for (let option of type.options)
+        {
+            let allowed = access && access[option.value === "temporary" ? "can_make_temporary" : "can_make_permanent"] === true;
+            option.disabled = option.value !== current && !allowed;
+        }
+        let other = current === "temporary" ? "permanent" : "temporary";
+        type.disabled = channel_id == null || !access || access["can_make_" + other] !== true;
+        type.title = channel_id == null ? "New channel type follows your permission to create permanent or temporary channels." : access && access[other + "_type_error"] || (type.disabled ? "Channel type changes are unavailable on this server or are still loading." : "Change between Permanent and Temporary.");
+        UI.describe_channel_type();
+    },
+
+    /**
+     * @brief explains the selected channel lifetime and any ownership change when converting it
+     *
+     * @return void
+     */
+    describe_channel_type: function()
+    {
+        let type = document.getElementById("channel-properties-type");
+        let converting = type.value !== type.dataset.originalValue;
+        document.getElementById("channel-properties-type-description").textContent = type.value === "temporary" ? converting ? "You become its owner. The channel is deleted when you leave or disconnect." : "Deleted when its owner leaves or disconnects." : "Stays on the server until deleted. Save server settings to keep changes after a restart.";
+    },
+
+    /**
+     * @brief opens one channel settings tab without clearing either tab's values
+     *
+     * @param name -> channel, audio or permissions
+     * @param focus -> whether to move keyboard focus to the tab
+     */
+    select_channel_properties_tab: function(name, focus)
+    {
+        if (!g_server_policy.is_permission_system_enabled && name === "permissions")
+        {
+            name = "channel";
+        }
+        for (let current of ["channel", "audio", "permissions"])
+        {
+            let selected = current === name;
+            let tab = document.getElementById("channel-properties-tab-" + current);
+            let panel = document.getElementById("channel-properties-panel-" + current);
+            tab.setAttribute("aria-selected", String(selected));
+            tab.tabIndex = selected ? 0 : -1;
+            panel.setAttribute("aria-hidden", String(!selected));
+            panel.inert = !selected;
+            if (selected && focus)
+            {
+                tab.focus();
+            }
+        }
+    },
+
+    /**
+     * @brief lets keyboard users move between channel settings tabs
+     *
+     * @param event -> key pressed on a tab
+     */
+    channel_properties_tab_onkeydown: function(event)
+    {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+        {
+            return;
+        }
+        event.preventDefault();
+        let names = g_server_policy.is_permission_system_enabled ? ["channel", "audio", "permissions"] : ["channel", "audio"];
+        let current = names.indexOf(event.currentTarget.id.replace("channel-properties-tab-", ""));
+        let next = event.key === "Home" ? 0 : event.key === "End" ? names.length - 1 : (current + (event.key === "ArrowRight" ? 1 : -1) + names.length) % names.length;
+        UI.select_channel_properties_tab(names[next], true);
+    },
+
+    /**
+     * @brief checks the channel power values before sending the channel settings
+     *
+     * @return object -> checked values, or null if a field is invalid
+     */
+    read_channel_power_inputs: function()
+    {
+        let result = {};
+        if (!g_server_policy.is_permission_system_enabled)
+        {
+            return result;
+        }
+        for (let action of ["talk", "stream", "message", "picture", "file", "view", "create"])
+        {
+            let input = document.getElementById("channel-properties-required-" + action + "-power");
+            let value = Number(input.value);
+            if (!input.checkValidity() || !Number.isInteger(value) || value < 0 || value > 1000)
+            {
+                UI.select_channel_properties_tab("permissions", false);
+                input.focus();
+                input.reportValidity();
+                return null;
+            }
+            result["required_" + action + "_power"] = value;
+        }
+        return result;
+    },
+
+    /**
+     * @brief updates full channel indicators, excluding music bots from occupancy
+     *
+     * @return void
+     */
+    refresh_all_channel_fullness: function()
+    {
+        for (let i = 0; i < g_channel_list.length; i++)
+        {
+            let ch = g_channel_list[i];
+            let is_full = false;
+
+            if (ch.is_client_limit_active == true && ch.max_client_count == 0)
+            {
+                // a limit of zero permits only admins and displays as full
+                is_full = true;
+            }
+            else if (ch.is_client_limit_active == true)
+            {
+                let count = 0;
+                for (let j = 0; j < g_client_list.length; j++)
+                {
+                    if (g_client_list[j].channel_id == ch.channel_id && g_client_list[j].is_music_bot != true)
+                    {
+                        count++;
+                    }
+                }
+                is_full = (count >= ch.max_client_count);
+            }
+
+            let row = document.querySelector('[data-channel-id="' + ch.channel_id + '"]');
+            if (row == null || row.children[2] == null)
+            {
+                continue;
+            }
+
+            // show a chevron only for channels with children or clients
+            let has_children = false;
+            for (let k = 0; k < g_channel_list.length; k++)
+            {
+                if (g_channel_list[k].parent_channel_id == ch.channel_id)
+                {
+                    has_children = true;
+                    break;
+                }
+            }
+            if (has_children == false)
+            {
+                for (let k = 0; k < g_client_list.length; k++)
+                {
+                    if (g_client_list[k].channel_id == ch.channel_id)
+                    {
+                        has_children = true;
+                        break;
+                    }
+                }
+            }
+            if (has_children == true)
+            {
+                row.classList.remove("single-channel-no-children");
+            }
+            else
+            {
+                row.classList.add("single-channel-no-children");
+            }
+
+            let name_el = row.children[2];
+            if (is_full == true && name_el.classList.contains("single-channel-is-full") == false)
+            {
+                name_el.classList.add("single-channel-is-full");
+            }
+            else if (is_full == false && name_el.classList.contains("single-channel-is-full") == true)
+            {
+                name_el.classList.remove("single-channel-is-full");
+            }
+        }
+    },
+
+    /**
+     * @brief opens an administration page while keeping the settings controls and their drafts
+     *
+     * @param object event -> click on the selected administration page
+     *
+     * @return void
+     */
+    server_settings_tab_li_onclick: function(event)
+    {
+        let item = event.currentTarget;
+        let action = item.getAttribute("data-action");
+        let page = item.getAttribute("data-settings-page");
+        let settings = document.getElementById("server-settings-tab-general-settings");
+        let fields = document.getElementById("server-settings-general-settings-container");
+        let nav_items = document.getElementsByClassName("server-settings-tab-li");
+
+        if (settings.style.display !== "none")
+        {
+            server_settings_page_scroll[server_settings_active_page] = fields.scrollTop;
+        }
+        for (let i = 0; i < nav_items.length; i++)
+        {
+            let selected = nav_items[i] === item;
+            nav_items[i].classList.toggle("server-settings-tab-li-selected", selected);
+            if (selected)
+            {
+                nav_items[i].setAttribute("aria-current", "page");
+            }
+            else
+            {
+                nav_items[i].removeAttribute("aria-current");
+            }
+        }
+
+        document.getElementById("server-settings-tab-groups").style.display = "none";
+        document.getElementById("server-settings-tab-emojis").style.display = "none";
+        settings.style.display = "none";
+        document.getElementById("server-settings-tab-bans").style.display = "none";
+        document.getElementById("server-settings-tab-log").style.display = "none";
+        server_settings_tab__sync_navigation();
+
+        if (page !== null)
+        {
+            server_settings_tab__show_page(page);
+            settings.style.display = "block";
+            fields.scrollTop = server_settings_page_scroll[page] || 0;
+            if (!server_settings_drafts.general.loaded)
+            {
+                server_info__request_admin_settings();
+            }
+            if (page === "general")
+            {
+                server_info__request(!g_server_info.banner_loaded);
+            }
+        }
+        else if (action == 1)
+        {
+            document.getElementById("server-settings-tab-groups").style.display = "block";
+        }
+        else if (action == 6)
+        {
+            document.getElementById("server-settings-tab-emojis").style.display = "block";
+            server_emojis__open_admin();
+        }
+        else if (action == 5)
+        {
+            document.getElementById("server-settings-tab-log").style.display = "block";
+
+            server_info__request_admin_settings();
+            connection__send_message_object({ message: { type: "admin_log_request" } });
+        }
+        else if (action == 3)
+        {
+            document.getElementById("server-settings-tab-bans").style.display = "block";
+            server_info__request_admin_settings();
+        }
+    },
+
+    /**
+     * @brief sends the typed admin password to the server and closes the dialog
+     *
+     * @return void
+     */
+    admin_password_send_button_onclick: function()
+    {
+        let admin_password = document.getElementById("input-admin-password").value;
+
+        let message_object = {
+            message: {
+                type: "admin_password",
+                value: admin_password,
+            }
+        };
+
+        connection__send_message_object(message_object);
+        console.log("admin password request sent");
+
+        document.getElementById("admin-password-enter-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+    },
+
+    /**
+     * @brief joins the selected channel using the entered password
+     *
+     * @return void
+     */
+    channel_join_button_onclick: function()
+    {
+        let channel_password = document.getElementById("input-channel-password").value;
+
+        let message_object = {
+            message:
+            {
+                type: "join_channel_request",
+                channel_id: parseInt(g_selected_channel_id),
+                channel_password: channel_password
+            }
+        };
+
+        connection__send_message_object(message_object);
+    },
+
+    /**
+     * @brief validates an avatar's size and uploads its data URL
+     *
+     * @return void
+     */
+    choose_avatar_input_onchange: function()
+    {
+        if (G_HAS_DOM == false)
+        {
+            return;
+        }
+
+        if (g_server_policy.is_avatar_upload_allowed == false)
+        {
+            utils__custom_alert("avatars are disabled on this server");
+            return;
+        }
+
+        let fileInput = document.getElementById('choose_avatar_input');
+
+        let file = fileInput.files[0];
+
+        if (file.size > g_server_policy.avatar_max_size)
+        {
+            utils__custom_alert("avatar is too large. Max size: " + Math.round(g_server_policy.avatar_max_size / 1024) + "kb");
+            return;
+        }
+
+        var fileReader = new FileReader();
+
+        if (fileReader && fileInput.files && fileInput.files.length)
+        {
+            fileReader.onload = function (event)
+            {
+                let message_object = {
+                    message:{
+                        type: "avatar_upload",
+                        base64_avatar: event.target.result
+                    }
+                };
+
+                // do not log request bodies: some contain passwords or private content
+
+                connection__send_message_object(message_object);
+            };
+
+            fileReader.readAsDataURL(file); // invokes onload
+        }
+    },
+
+    /**
+     * @brief connects the channel icon picker once
+     *
+     * @return void
+     */
+    wire_settings_delete_delegation: function()
+    {
+        if (settings_delete_delegation_wired == true)
+        {
+            return;
+        }
+
+        let picker = document.getElementById("group-icon-picker-popup");
+        if (picker != null)
+        {
+            picker.addEventListener("click", function(event)
+            {
+                let option = event.target.closest(".group-icon-picker-option");
+                if (option == null)
+                {
+                    return;
+                }
+                // the icon picker is shared: route the pick to whichever target opened it
+                if (channel_icon_picker_target_channel_id != null)
+                {
+                    UI.send_set_channel_icon_request(channel_icon_picker_target_channel_id, option.getAttribute("data-picker-icon-id"));
+                }
+                else
+                {
+                    UI.send_set_group_icon_request(group_icon_picker_target_group_id, option.getAttribute("data-picker-icon-id"));
+                }
+                UI.close_group_icon_picker();
+            });
+        }
+
+        // close the picker on Escape, or a click outside it that is not the click that opened it
+        document.addEventListener("keydown", function(event)
+        {
+            if (event.key == "Escape")
+            {
+                UI.close_group_icon_picker();
+            }
+        });
+        document.addEventListener("click", function(event)
+        {
+            let open_picker = document.getElementById("group-icon-picker-popup");
+            if (open_picker == null || open_picker.style.display == "none")
+            {
+                return;
+            }
+            if (open_picker.contains(event.target))
+            {
+                return;
+            }
+            // do not close the picker on the same click that opened it
+            if (event.target.closest(".group-settings-entry-img") != null)
+            {
+                return;
+            }
+            if (event.target.closest("#channel-properties-icon-box") != null)
+            {
+                return;
+            }
+            UI.close_group_icon_picker();
+        });
+
+        settings_delete_delegation_wired = true;
+    },
+    /**
+     * @brief sends server_settings_delete_group
+     *
+     * @param number group_id -> the group
+     *
+     * @return void
+     */
+    send_delete_group_request: function(group_id)
+    {
+        let message_object = { message: { type: "server_settings_delete_group", group_id: group_id } };
+        connection__send_message_object(message_object);
+    },
+    /**
+     * @brief sends server_settings_delete_icon
+     *
+     * @param number icon_id -> the icon
+     *
+     * @return void
+     */
+    send_delete_icon_request: function(icon_id)
+    {
+        let message_object = { message: { type: "server_settings_delete_icon", icon_id: icon_id } };
+        connection__send_message_object(message_object);
+    },
+
+    /**
+     * @brief opens the icon picker for a channel
+     *
+     * @param number channel_id -> the channel
+     *
+     * @return void
+     */
+    open_channel_icon_picker: function(channel_id)
+    {
+        let popup = document.getElementById("group-icon-picker-popup");
+        if (popup == null)
+        {
+            return;
+        }
+
+        channel_icon_picker_target_channel_id = channel_id;
+        group_icon_picker_target_group_id = null;
+
+        let heading = document.createElement("div");
+        let title = document.createElement("strong");
+        let cancel = document.createElement("button");
+        heading.className = "channel-icon-picker-heading";
+        title.textContent = "Channel icon";
+        cancel.type = "button";
+        cancel.className = "button-1";
+        cancel.textContent = "Cancel";
+        cancel.onclick = UI.close_group_icon_picker;
+        heading.append(title, cancel);
+        popup.replaceChildren(heading);
+        for (let icon of [null, ...g_icons])
+        {
+            let button = document.createElement("button");
+            button.type = "button";
+            button.className = "group-icon-picker-option";
+            button.dataset.pickerIconId = icon ? String(icon.id) : "none";
+            button.title = icon ? "Icon " + icon.id : "No icon";
+            button.setAttribute("aria-label", button.title);
+            if (icon)
+            {
+                let image = document.createElement("img");
+                image.src = icon.base64_icon;
+                image.alt = "";
+                image.loading = "lazy";
+                button.appendChild(image);
+            }
+            else
+            {
+                button.textContent = "None";
+            }
+            popup.appendChild(button);
+        }
+        if (g_icons.length === 0)
+        {
+            let empty = document.createElement("p");
+            empty.textContent = "No icons uploaded yet. Upload icons in Server groups.";
+            popup.appendChild(empty);
+        }
+        popup.setAttribute("role", "dialog");
+        popup.setAttribute("aria-label", "Choose channel icon");
+        document.body.appendChild(popup);
+        popup.style.zIndex = "100001";
+        popup.style.display = "flex";
+        popup.querySelector(".group-icon-picker-option").focus();
+    },
+    /**
+     * @brief hides the shared icon picker and forgets both its group and channel targets
+     *
+     * @return void
+     */
+    close_group_icon_picker: function()
+    {
+        let popup = document.getElementById("group-icon-picker-popup");
+        if (popup != null)
+        {
+            let return_focus = popup.contains(document.activeElement) && channel_icon_picker_target_channel_id != null;
+            popup.style.display = "none";
+            if (return_focus)
+            {
+                document.getElementById("channel-properties-icon-box").focus();
+            }
+        }
+        group_icon_picker_target_group_id = null;
+        channel_icon_picker_target_channel_id = null;
+    },
+    /**
+     * @brief assigns a group icon or clears it when none is selected
+     *
+     * @param number group_id -> the group
+     * @param string|number picked_icon_id -> the icon id, or "none"
+     *
+     * @return void
+     */
+    send_set_group_icon_request: function(group_id, picked_icon_id)
+    {
+        if (group_id == null)
+        {
+            return;
+        }
+
+        let message = { type: "server_settings_set_group_icon", group_id: group_id };
+        if (picked_icon_id != "none")
+        {
+            message.icon_id = parseInt(picked_icon_id);
+        } // absent icon_id clears the icon
+
+        let message_object = { message: message };
+        connection__send_message_object(message_object);
+    },
+    /**
+     * @brief assigns a channel icon or clears it when none is selected
+     *
+     * @param number channel_id -> the channel
+     * @param string|number picked_icon_id -> the icon id, or "none"
+     *
+     * @return void
+     */
+    send_set_channel_icon_request: function(channel_id, picked_icon_id)
+    {
+        if (channel_id == null)
+        {
+            console.warn("set channel icon: channel_id is null; request not sent");
+            return;
+        }
+
+        let message = { type: "set_channel_icon", channel_id: parseInt(channel_id) };
+        if (picked_icon_id != "none")
+        {
+            message.icon_id = parseInt(picked_icon_id);
+        } // absent icon_id clears the icon
+
+        let message_object = { message: message };
+        connection__send_message_object(message_object);
+    },
+    /**
+     * @brief updates a channel row's icon from the current channel record
+     *
+     * @param object channel -> the channel from g_channel_list
+     *
+     * @return void
+     */
+    refresh_channel_icon: function(channel)
+    {
+        if (channel == null)
+        {
+            return;
+        }
+
+        let holder = document.querySelector('.single-channel-icon[data-channel-icon-for="' + channel.channel_id + '"]');
+        if (holder == null)
+        {
+            return;
+        }
+
+        let icon = (channel.has_channel_icon == true) ? channel_tree__get_icon_by_icon_id(channel.channel_icon_id) : null;
+
+        if (icon != null)
+        {
+            holder.style.display = "inline-block";
+            holder.style.width = "15px";
+            holder.style.height = "15px";
+            holder.style.backgroundSize = "contain";
+            holder.style.backgroundRepeat = "no-repeat";
+            holder.style.backgroundPosition = "center";
+            holder.style.verticalAlign = "middle";
+            holder.style.marginLeft = "4px";
+            holder.style.backgroundImage = "url(" + icon.base64_icon + ")";
+        }
+        else
+        {
+            holder.style.display = "none";
+            holder.style.backgroundImage = "";
+        }
+    },
+    /**
+     * @brief repaints the icon box of every channel row from the current g_channel_list
+     *
+     * @return void
+     */
+    refresh_all_channel_icons: function()
+    {
+        for (let i = 0; i < g_channel_list.length; i++)
+        {
+            UI.refresh_channel_icon(g_channel_list[i]);
+        }
+    },
+    /**
+     * @brief paints the channel edit form's icon box from the channel's current icon, or clears it
+     *
+     * @param object|null channel -> the channel being edited
+     *
+     * @return void
+     */
+    refresh_channel_edit_icon_box: function(channel)
+    {
+        let box = document.getElementById("channel-properties-icon-box");
+        if (box == null)
+        {
+            return;
+        }
+
+        let icon = (channel != null && channel.has_channel_icon == true) ? channel_tree__get_icon_by_icon_id(channel.channel_icon_id) : null;
+        box.style.backgroundImage = (icon != null) ? ("url(" + icon.base64_icon + ")") : "";
+        box.disabled = channel == null;
+        box.title = channel == null ? "Create the channel before choosing an icon." : "Change the channel icon now.";
+        document.getElementById("channel-properties-icon-remove-button").disabled = icon == null;
+    },
+
+    /**
+     * @brief reads an accepted MP3 and sends its bytes to the decoding worker
+     *
+     * @return void
+     */
+    choose_song_file_input_onchange: function()
+    {
+        if (G_HAS_DOM == false)
+        {
+            return;
+        }
+
+        if (!groups__can_send_to_channel("talk", g_current_channel_id))
+        {
+            groups__notify_channel_power_denied("talk");
+            return;
+        }
+
+        if (g_is_microphone_enabled == false)
+        {
+            return;
+        }
+
+        let fileInput = document.getElementById('choose-song-file-input');
+
+        let file = fileInput.files[0];
+        let max_size = 40 * 1024 * 1024;
+
+        if (file.size > max_size)
+        {
+            utils__custom_alert("file is too large. Max size: 40mb");
+            return;
+        }
+
+        var fileReader = new FileReader();
+
+        if (fileReader && fileInput.files && fileInput.files.length)
+        {
+            fileReader.readAsArrayBuffer(fileInput.files[0]);
+
+            g_selected_song_name = fileInput.files[0].name;
+
+            let file_extension = chat__get_file_extension(g_selected_song_name);
+
+            g_is_microphone_active = true;
+            let message_object = {
+                message: {
+                    type: "microphone_usage",
+                    value: 1,
+                }
+            };
+
+            is_playing_music = true;
+
+            connection__send_message_object(message_object);
+            g_last_sent_value_microphone_usage = 1;
+
+            fileReader.onload = function (event)
+            {
+                if (!groups__can_send_to_channel("talk", g_current_channel_id))
+                {
+                    groups__notify_channel_power_denied("talk");
+                    is_playing_music = false;
+                    g_is_microphone_active = false;
+                    return;
+                }
+                if (file_extension == "mp3")
+                {
+                    document.getElementById("custom-file-upload-button-song").style.display = "none";
+                    document.getElementById("stop-song").style.display = "block";
+
+                    let arrayBuffer = fileReader.result;
+
+                    g_minimp3_worker.postMessage({
+                        type: "decode",
+                        value: arrayBuffer
+                    });
+                }
+            };
+        }
+    },
+
+    /**
+     * @brief the drag handle next to the chat column: starts the grid column drag
+     *
+     * @param object e -> the mouse event
+     *
+     * @return void
+     */
+    drag_resize_chat_onclick: function(e)
+    {
+        layout__layout_column_drag_start(e, "chat");
+    },
+
+    /**
+     * @brief opens the admin password dialog and its overlay
+     *
+     * @return void
+     */
+    enter_admin_password_button_onclick: function()
+    {
+        document.getElementById("admin-password-enter-container").style.display = "block";
+        document.getElementById("background-container").style.display = "block";
+    },
+
+    /**
+     * @brief closes identity export and clears its displayed passphrase
+     *
+     * @return void
+     */
+    close_button_secret_identity_string_onclick: function()
+    {
+        document.getElementById("secret-identity-string-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+        document.getElementById("p-secret-identity-string").value = "";
+    },
+
+    /**
+     * @brief clears visible messages and resets the current conversation's sender tracking
+     *
+     * @return void
+     */
+    clear_chat_button_onclick: function()
+    {
+        for (const context of document.querySelectorAll(".chat-context"))
+        {
+            chat_history__trim(context, 0);
+            chat_replies.pending.delete(context);
+        }
+        // remove empty/legacy wrappers too, using a snapshot rather than a live collection
+        for (const element of document.querySelectorAll(".single-chat-message, .single-server-message"))
+        {
+            element.remove();
+        }
+        for (const state of g_chat_context_array)
+        {
+            state.last_known_message_sender_username = "";
+        }
+        last_known_message_sender_username = "";
+        chat_history.matches = [];
+        chat_history.selected = -1;
+        if (typeof CSS !== "undefined" && CSS.highlights)
+        {
+            CSS.highlights.clear();
+        }
+        unreceipted_messages_by_sender = {};
+        seen_receipts_already_sent = {};
+        g_chat_message_author_public_keys = {};
+        chat_files__reset_receiving();
+        chat_files__prune_chat_files_without_cards();
+    },
+
+
+    /**
+     * @brief saves the eight settings pages and country block draft together
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    save_server_settings_button_onclick: function(event)
+    {
+        let settings = null;
+
+        event.stopPropagation();
+
+        settings = server_settings_tab__collect_server_settings_from_tab("general");
+        if (settings === null)
+        {
+            return;
+        }
+        settings.blocked_countries = g_blocked_countries_draft;
+        if (server_settings_tab__begin_save("general", settings))
+        {
+            connection__send_message_object({ message: settings });
+        }
+    },
+
+    /**
+     * @brief saves the log settings without changing general settings
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    server_settings_log_save_button_onclick: function(event)
+    {
+        let settings = null;
+        event.stopPropagation();
+        settings = server_settings_tab__collect_server_settings_from_tab("log");
+        if (server_settings_tab__begin_save("log", settings))
+        {
+            connection__send_message_object({ message: settings });
+        }
+    },
+
+    /**
+     * @brief asks the server for the admin log again
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    server_settings_log_refresh_button_onclick: function(event)
+    {
+        event.stopPropagation();
+        connection__send_message_object({ message: { type: "admin_log_request" } });
+    },
+
+    /**
+     * @brief requests clearing the server log and a refreshed log response
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    server_settings_log_clear_button_onclick: function(event)
+    {
+        event.stopPropagation();
+        connection__send_message_object({ message: { type: "admin_log_clear" } });
+    },
+
+    /**
+     * @brief applies an imported identity through the current identity owner
+     *
+     * @param string|null identity_passphrase_string -> passphrase, or null for a native key size change
+     * @param number|null rsa_key_bits -> the file's key size. null keeps the current setting for raw passphrases
+     *
+     * @return boolean|undefined native save result, or undefined for other paths
+     */
+    identity_apply_passphrase: function(identity_passphrase_string, rsa_key_bits = null)
+    {
+        const selected_bits = rsa_key_bits === null ? g_rsa_key_bits : rsa_key_bits;
+        if (!G_ALLOWED_RSA_KEY_BITS.includes(selected_bits))
+        {
+            utils__custom_alert("This identity uses an unsupported RSA key size.");
+            return;
+        }
+        if (typeof Android !== "undefined" && Android != null)
+        {
+            const resizing = identity_passphrase_string === null;
+            if ((!resizing && typeof Android.JavaExportReplaceIdentity !== "function") || (resizing && typeof Android.JavaExportResizeIdentity !== "function"))
+            {
+                utils__custom_alert("This Android runtime does not support identity import. Update the app before importing.");
+                return;
+            }
+            const operation_bytes = new Uint8Array(16);
+            crypto.getRandomValues(operation_bytes);
+            const operation_id = Array.from(operation_bytes, function(value)
+            {
+                return value.toString(16).padStart(2, "0");
+            }).join("");
+            try
+            {
+                const response = resizing ? Android.JavaExportResizeIdentity(selected_bits, operation_id, g_identity_revision) : Android.JavaExportReplaceIdentity(identity_passphrase_string, selected_bits, operation_id, g_identity_revision);
+                const result = JSON.parse(response);
+                if (result == null || result.ok !== true)
+                {
+                    throw new Error(result != null && typeof result.error === "string" ? result.error : "The identity could not be saved. Your current identity was kept.");
+                }
+                g_identity_revision = result.identity_revision;
+                g_identity_import_expected_revision = result.identity_revision;
+                g_is_identity_import_pending = true;
+                document.getElementById("identity-string-use-textarea").value = "";
+                UI.identity_clear_file_selection();
+                document.getElementById("identity-string-use-container").style.display = "none";
+                document.getElementById("background-container").style.display = "none";
+                document.getElementById("another-buttons-sub-loading-container").style.display = "block";
+                document.getElementById("another-buttons-sub-container").style.display = "none";
+                return true;
+            }
+            catch (error)
+            {
+                utils__custom_alert(error.message);
+            }
+            return false;
+        }
+        UI.identity_clear_file_selection();
+        document.getElementById("identity-string-use-textarea").value = "";
+
+        document.getElementById("identity-string-use-container").style.display = "none";
+        document.getElementById("background-container").style.display = "none";
+        if (identity_passphrase_string === g_identity_string && UI.identity_current_rsa_key_bits() === selected_bits)
+        {
+            // a duplicate generation request has no completion event. finish it here
+            document.getElementById("another-buttons-sub-loading-container").style.display = "none";
+            document.getElementById("another-buttons-sub-container").style.display = "";
+            connection__identity_imported();
+            return;
+        }
+
+        // the result is announced when the key pair exists (connection__identity_imported)
+        g_is_identity_import_pending = true;
+
+        // clear the identity slot until the new key pair is ready
+        connection__request_identity(identity_passphrase_string, selected_bits);
+
+        document.getElementById("another-buttons-sub-loading-container").style.display = "block";
+        document.getElementById("another-buttons-sub-container").style.display = "none";
+
+        // the session owner closes the old connection before it posts generation work
+    },
+
+    /**
+     * @brief validates and imports the entered identity passphrase
+     *
+     * @return void
+     */
+    identity_string_use_confirm_button: function()
+    {
+        let textarea = document.getElementById("identity-string-use-textarea");
+        let identity_passphrase_string = textarea.value;
+
+        if (identity_passphrase_string != null && identity_passphrase_string.length > 0)
+        {
+
+            if (identity_passphrase_string.length < 199)
+            {
+                utils__custom_alert("An identity passphrase must contain at least 199 characters. Paste the complete passphrase without changing its whitespace.");
+                return;
+            }
+            const selected_bits = Number(document.getElementById("identity-import-rsa-key-bits").value);
+            if (!G_ALLOWED_RSA_KEY_BITS.includes(selected_bits))
+            {
+                utils__custom_alert("Choose this identity's original key size before importing the passphrase.");
+                return;
+            }
+            UI.identity_apply_passphrase(identity_passphrase_string, selected_bits);
+        }
+    },
+
+    /**
+     * @brief builds a safe identity filename from the current username
+     *
+     * @return string the file name, ending in .lmn
+     */
+    identity_export_file_name: function()
+    {
+        let base_name = (typeof g_local_username === "string" && g_local_username.length > 0) ? g_local_username : "identity";
+
+        base_name = base_name.replace(/[\\/:*?"<>|]/g, "_").trim();
+        if (base_name.length == 0)
+        {
+            base_name = "identity";
+        }
+
+        return base_name + ".lmn";
+    },
+
+    /**
+     * @brief reads the current identity's generation size, separately from the next key preference
+     *
+     * @return number supported generation size, or zero while no valid identity is ready
+     */
+    identity_current_rsa_key_bits: function()
+    {
+        if (!g_is_rsa_key_generated || typeof g_rsa_public_key_string !== "string" || !g_rsa_public_key_string)
+        {
+            return 0;
+        }
+        return identity_file__generation_size(g_rsa_public_key_string);
+    },
+
+    /**
+     * @brief serializes both inputs needed to reproduce the current identity
+     *
+     * @return string versioned UTF-8 JSON file contents
+     */
+    identity_export_file_content: function()
+    {
+        let rsa_key_bits = UI.identity_current_rsa_key_bits();
+        if (!rsa_key_bits || typeof g_identity_string !== "string" || g_identity_string.length < 199)
+        {
+            throw new Error("The identity is not ready yet. Wait for key generation to finish, then try again.");
+        }
+        return identity_file__serialize(g_identity_string, rsa_key_bits);
+    },
+
+    /**
+     * @brief validates a versioned or legacy identity file without applying it
+     *
+     * @param string content UTF-8 file text
+     *
+     * @return object passphrase, optional key size, and whether the file is a legacy export
+     */
+    identity_parse_file_content: function(content)
+    {
+        return identity_file__parse(content);
+    },
+
+    /**
+     * @brief clears a pending identity file selection without changing the current identity
+     *
+     * @return void
+     */
+    identity_clear_file_selection: function()
+    {
+        identity_file_read_generation++;
+        pending_identity_file = null;
+        document.getElementById("identity-file-status").textContent = "";
+        document.getElementById("identity-file-confirm-button").disabled = true;
+    },
+
+    /**
+     * @brief saves the passphrase and actual key size as a versioned <username>.lmn identity file
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    export_identity_file_button_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        if (typeof Android !== "undefined" && Android != null)
+        {
+            try
+            {
+                if (typeof Android.JavaExportExportIdentity !== "function")
+                {
+                    throw new Error("Update the Android app before exporting this identity.");
+                }
+                const result = JSON.parse(Android.JavaExportExportIdentity(UI.identity_export_file_name()));
+                if (result == null || result.ok !== true)
+                {
+                    throw new Error(result != null && typeof result.error === "string" ? result.error : "The identity file could not be saved.");
+                }
+            }
+            catch (error)
+            {
+                utils__custom_alert(error.message);
+            }
+            return;
+        }
+
+        let content;
+        try
+        {
+            content = UI.identity_export_file_content();
+        }
+        catch (error)
+        {
+            utils__custom_alert(error.message);
+            return;
+        }
+
+        let file_name = UI.identity_export_file_name();
+
+        // Java saves Android exports to Downloads
+        if (typeof Android !== "undefined" && Android != null && typeof Android.JavaExportSaveFile === "function")
+        {
+            Android.JavaExportSaveFile(file_name, "application/octet-stream", utils__bytesToBase64String(new TextEncoder().encode(content)));
+            return;
+        }
+
+        let url = URL.createObjectURL(new Blob([content], { type: "application/octet-stream" }));
+        let anchor = document.createElement("a");
+
+        anchor.href = url;
+        anchor.download = file_name;
+        anchor.style.display = "none";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+
+        setTimeout(function()
+        {
+            URL.revokeObjectURL(url);
+        }, 60000);
+    },
+
+    /**
+     * @brief opens the identity file picker
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    choose_identity_file_button_onclick: function(event)
+    {
+        event.stopPropagation();
+        document.getElementById("identity-file-input").click();
+    },
+
+    /**
+     * @brief reads the selected identity file and resets the file input
+     *
+     * @return void
+     */
+    identity_file_input_onchange: function()
+    {
+        let input = document.getElementById("identity-file-input");
+
+        if (input.files == null || input.files.length == 0)
+        {
+            return;
+        }
+
+        UI.identity_read_identity_file(input.files[0]);
+
+        // so choosing the same file again still fires a change event
+        input.value = "";
+    },
+
+    /**
+     * @brief reads and validates a picked file. only its confirmation can change the identity or key size
+     *
+     * @param File file -> the file
+     *
+     * @return void
+     */
+    identity_read_identity_file: function(file)
+    {
+        let status_line = document.getElementById("identity-file-status");
+        let confirm_button = document.getElementById("identity-file-confirm-button");
+
+        UI.identity_clear_file_selection();
+        let read_generation = identity_file_read_generation;
+
+        if (file == null)
+        {
+            return;
+        }
+
+        if (file.size > 65536)
+        {
+            status_line.textContent = "Choose an identity file no larger than 64 KB.";
+            return;
+        }
+
+        let reader = new FileReader();
+        status_line.textContent = "Reading " + file.name + "…";
+
+        reader.onload = function()
+        {
+            if (read_generation !== identity_file_read_generation)
+            {
+                return;
+            }
+            try
+            {
+                pending_identity_file = UI.identity_parse_file_content(identity_file__decode(reader.result));
+                status_line.textContent = pending_identity_file.legacy ? file.name + " — legacy file: key size is not stored. Choose the original size in Local settings → Identity before importing." : file.name + " — " + pending_identity_file.rsa_key_bits + "-bit identity ready to import.";
+                confirm_button.disabled = false;
+            }
+            catch (error)
+            {
+                status_line.textContent = error.message;
+            }
+        };
+
+        reader.onerror = function()
+        {
+            if (read_generation === identity_file_read_generation)
+            {
+                status_line.textContent = "Could not read " + file.name + ". Choose the file again.";
+            }
+        };
+
+        reader.readAsArrayBuffer(file);
+    },
+
+    /**
+     * @brief applies the confirmed identity file's passphrase and key size
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    identity_file_confirm_button_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        if (pending_identity_file === null)
+        {
+            return;
+        }
+
+        let identity = pending_identity_file;
+        UI.identity_clear_file_selection();
+        UI.identity_apply_passphrase(identity.passphrase, identity.rsa_key_bits);
+    },
+
+    /**
+     * @brief switches identity import between file and passphrase entry
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    identity_mode_toggle_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        let file_mode = document.getElementById("identity-file-mode");
+        let string_mode = document.getElementById("identity-string-mode");
+        let toggle_link = document.getElementById("identity-mode-toggle-link");
+        let is_file_mode_active = file_mode.style.display != "none";
+
+        UI.identity_clear_file_selection();
+        file_mode.style.display = is_file_mode_active ? "none" : "block";
+        string_mode.style.display = is_file_mode_active ? "block" : "none";
+        toggle_link.textContent = is_file_mode_active ? "Choose a file instead" : "Paste a passphrase instead";
+    },
+
+    /**
+     * @brief saves the selected font size and applies it to the message input
+     *
+     * @param object event -> the input event
+     *
+     * @return void
+     */
+    chat_input_font_size_range_oninput: function(event)
+    {
+        g_selected_font_size = parseInt(event.srcElement.value);
+        document.getElementById("chat-input-container-text-input").style.fontSize = event.srcElement.value + "px";
+    },
+
+    /**
+     * @brief the color picker: stores g_selected_font_color and paints the swatch and the chat input with it
+     *
+     * @param object event -> the input event
+     *
+     * @return void
+     */
+    color_picker_oninput: function(event)
+    {
+        g_selected_font_color = event.srcElement.value;
+        document.getElementById("color-picker-selector-div").style.backgroundColor = event.srcElement.value;
+        document.getElementById("chat-input-container-text-input").style.color = event.srcElement.value;
+    },
+
+    /**
+     * @brief opens the dialog that reveals the local identity: the export button and the raw passphrase
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    show_secret_identity_string_onclick: function(event)
+    {
+        event.stopPropagation();
+        document.getElementById("secret-identity-string-container").style.display = "block";
+        document.getElementById("background-container").style.display = "block";
+        document.getElementById("p-secret-identity-string").value = g_identity_string || "";
+        document.getElementById("identity-export-passphrase-fields").style.display = typeof Android !== "undefined" && Android != null ? "none" : "";
+        document.getElementById("export-identity-file-name").textContent = UI.identity_export_file_name();
+        let rsa_key_bits = UI.identity_current_rsa_key_bits();
+        document.getElementById("identity-export-hint").textContent = rsa_key_bits ? "To use this passphrase without a file, paste it in Import Identity on the other device and choose " + rsa_key_bits + " bits as its original key size." : "Wait for identity key generation to finish before exporting or copying this identity.";
+    },
+
+    /**
+     * @brief opens server settings for an admin and selects the general settings tab
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    enter_server_settings_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        console.log("enter_server_settings_onclick");
+
+        // only admins may open server settings
+        if (channel_tree__is_local_client_admin() == false)
+        {
+            return;
+        }
+
+        if (is_server_settings_tab_visible == false)
+        {
+            // clear the previous drag position and center the window
+            let tab = document.getElementById("server-settings-tab");
+            tab.style.position = "fixed";
+            tab.style.margin = "0";
+            tab.style.transform = "none";
+            tab.style.display = "block";
+            let rect = tab.getBoundingClientRect();
+            tab.style.left = Math.max(0, Math.round((window.innerWidth - rect.width) / 2)) + "px";
+            tab.style.top = Math.max(0, Math.round((window.innerHeight - rect.height) / 2)) + "px";
+            is_server_settings_tab_visible = true;
+
+            document.querySelector('.server-settings-tab-li[data-action="2"]').click();
+            if (server_settings_drafts.general.loaded)
+            {
+                server_info__request_admin_settings();
+            }
+        }
+        else
+        {
+            document.getElementById("server-settings-tab").style.display = "none";
+            is_server_settings_tab_visible = false;
+        }
+    },
+
+    /**
+     * @brief hides the server settings window and clears its visibility flag
+     *
+     * @return void
+     */
+    close_button_server_settings_onclick: function()
+    {
+        document.getElementById("server-settings-tab").style.display = "none";
+        is_server_settings_tab_visible = false;
+    },
+
+    /**
+     * @brief opens identity import with no file selected
+     *
+     * @return void
+     */
+    import_identity_button_onclick: function()
+    {
+        // start with file import and no selection
+        UI.identity_clear_file_selection();
+        document.getElementById("identity-file-mode").style.display = "block";
+        document.getElementById("identity-string-mode").style.display = "none";
+        document.getElementById("identity-mode-toggle-link").textContent = "Paste a passphrase instead";
+        document.getElementById("identity-import-rsa-key-bits").value = String(g_rsa_key_bits);
+        document.getElementById("identity-passphrase-hint").textContent = "Copy the complete passphrase from Export Identity.";
+
+        document.getElementById("identity-string-use-container").style.display = "block";
+        document.getElementById("background-container").style.display = "block";
+    },
+
+    /**
+     * @brief opens identity import with the saved passphrase and recovery reason when available
+     *
+     * @param object recovery -> optional passphrase and reason the identity could not be restored
+     *
+     * @return void
+     */
+    identity_show_saved_recovery: function(recovery)
+    {
+        UI.import_identity_button_onclick();
+        if (typeof recovery.passphrase === "string")
+        {
+            document.getElementById("identity-file-mode").style.display = "none";
+            document.getElementById("identity-string-mode").style.display = "block";
+            document.getElementById("identity-mode-toggle-link").textContent = "Choose a file instead";
+            document.getElementById("identity-string-use-textarea").value = recovery.passphrase;
+            document.getElementById("identity-import-rsa-key-bits").value = "";
+            document.getElementById("identity-passphrase-hint").textContent = recovery.reason;
+        }
+        else
+        {
+            document.getElementById("identity-file-status").textContent = recovery.reason;
+        }
+    },
+
+    /**
+     * @brief toggles g_show_hide_toggle and hides or shows every country flag in the user list
+     *
+     * @return void
+     */
+    hide_show_flags_button_onclick: function()
+    {
+        let elements_count1 = document.getElementsByClassName("connected-client-country-flag").length;
+
+        if (g_show_hide_toggle == false)
+        {
+            for (let i = 0; i < elements_count1; i++)
+            {
+                document.getElementsByClassName("connected-client-country-flag")[i].classList.add("connected-client-country-flag-hide");
+            }
+        }
+        else
+        {
+            for (let i = 0; i < elements_count1; i++)
+            {
+                document.getElementsByClassName("connected-client-country-flag")[i].classList.remove("connected-client-country-flag-hide");
+            }
+        }
+
+        g_show_hide_toggle = !g_show_hide_toggle;
+    },
+
+    /**
+     * @brief opens the font menu above the pointer
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    chat_input_container_on_mousedown: function(event)
+    {
+
+        if (event.which == 1)
+        {
+
+        }
+
+        else if (event.which == 3)
+        {
+            event.stopPropagation();
+            UI.delete_contextmenus();
+            console.log("test");
+
+            let contextmenu_html = "<div class=\"chat-input-container-context-menu\" style=\"top: " + (event.clientY - 130).toString() + "px; left:" + event.clientX.toString() + "px; \">\n\
+                                                <div class='chat-input-container-context-menu-background'>\n\
+                                                </div>\n\
+                                                <div class='chat-input-container-context-menu-items'>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-default'>font: default</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Yellowtail'>font: Yellowtail</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Bruno-Ace-SC'>font: Bruno Ace</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Raleway'>font: Raleway</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Kavoon'>font: Kavoon</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Reenie-Beanie'>font: Reenie Beanie</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Sacramento'>font: Sacramento</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Sofia'>font: Sofia</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Nova-Mono'>font: Nova Mono</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Codystar'>font: Codystar</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Londrina-Outline'>font: Londrina Outline</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Mystery-Quest'>font: Mystery Quest</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Nosifer'>font: Nosifer</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Simonetta'>font: Simonetta</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Hanalei'>font: Hanalei</p>\n\
+                                                    <p class='context-menu-item' data-action='custom-font-usage-Just-Me-Again-Down-Here'>font: Just me</p>\n\
+                                                </div>\n\
+                                            </div>";
+
+            document.getElementById("contextmenus-container").insertAdjacentHTML("beforeend", contextmenu_html);
+
+            let contextmenu_item_count = document.getElementsByClassName("context-menu-item").length;
+
+            for (let i = 0; i < contextmenu_item_count; i++)
+            {
+                document.getElementsByClassName("context-menu-item")[i].addEventListener("click", UI.contextmenuitem_chat_input_container_onclick);
+            }
+        }
+    },
+
+    /**
+     * @brief sends a nonempty poke to the selected client and closes the dialog
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    poke_client_send_button_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        let poke_message = document.getElementById("input-poke-client").value;
+
+        if (poke_message.length == 0)
+        {
+            return;
+        }
+
+        document.getElementById("poke-client-enter-container").style.display = "none";
+
+        let message_object = {
+            message:
+            {
+                type: "poke_client",
+                client_id: parseInt(g_selected_client_id),
+                poke_message: poke_message
+            }
+        };
+
+        connection__send_message_object(message_object);
+    },
+
+
+    /**
+     * @brief toggles sound effects and synchronizes native settings and toolbar state
+     *
+     * @return void
+     */
+    sound_effects_button_onclick: function()
+    {
+        g_are_sound_effects_enabled = !g_are_sound_effects_enabled;
+
+        if (g_are_sound_effects_enabled == true)
+        {
+            document.getElementById("sound-effects-button").style.backgroundImage = "url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+PCFET0NUWVBFIHN2ZyBQVUJMSUMgIi0vL1czQy8vRFREIFNWRyAxLjEvL0VOIiAiaHR0cDovL3d3dy53My5vcmcvR3JhcGhpY3MvU1ZHLzEuMS9EVEQvc3ZnMTEuZHRkIj48c3ZnIHdpZHRoPSIxODJweCIgaGVpZ2h0PSIxNjBweCIgdmVyc2lvbj0iMS4xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4bWw6c3BhY2U9InByZXNlcnZlIiB4bWxuczpzZXJpZj0iaHR0cDovL3d3dy5zZXJpZi5jb20vIiBzdHlsZT0iZmlsbC1ydWxlOmV2ZW5vZGQ7Y2xpcC1ydWxlOmV2ZW5vZGQ7c3Ryb2tlLWxpbmVqb2luOnJvdW5kO3N0cm9rZS1taXRlcmxpbWl0OjI7Ij48ZyB0cmFuc2Zvcm09Im1hdHJpeCgwLjI0LDAsMCwwLjI0LC01MTguMDg4MjEyLC01NDIuNDU0NDM4KSI+PGc+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwyMTIwLjkxNDAwNCwyMTUwLjU1MzYwNSkiPjxwYXRoIGQ9Ik00NDIsMTM0QzQ0MywxMzUgNDQzLDEzNSA0NDksMTQwQzQ1NCwxNDYgNDUzLDE0NiA0NTksMTUyQzQ3MywxNjYgNDcyLDE3MyA0NzUsMTgyQzQ3NiwxODggNDg1LDIyMyA0NjgsMjU4QzQ2NSwyNjMgNDQ2LDMwMiA0MTcsMzE3QzQxMSwzMjAgMzcwLDMxOCAzNDAsMzMyQzI5NywzNTQgMzAxLDM2MCAyNjIsMzg5QzI1NiwzOTMgMjU1LDM5MyAyNDcsMzg2QzI0MSwzNzkgMjEzLDM2OCAyMDcsMzY4QzIwMSwzNjcgMjAyLDM2OCAxOTUsMzY5QzE0MCwzNzUgMTU2LDQ4NiAyMDEsNDkyQzIyNSw0OTUgMjIyLDUwNiAyMjEsNTQ1QzIyMSw1NDggMjIwLDU0NyAyMjAsNTUwQzIxOSw1NzUgMjE3LDU3NCAyMTYsNTk5QzIxNiw2MDEgMjE1LDYwMiAyMTUsNjA1QzIxMiw2NzkgMjI3LDcxNCAyNTAsNzQ5QzI1Nyw3NTkgMjM5LDc1OCAyMzYsNzU3QzIyNyw3NTMgMTkzLDc1OCAxNDEsNzQwQzEzMiw3MzcgMTMyLDczNiAxMjQsNzMzQzg1LDcyMCA2MSw2ODUgNTcsNjc3QzQyLDY0NiA0Niw2MjcgNDUsNjIzQzQxLDYxMSA0NCw2MDcgNDMsNjAyQzM5LDU5MSA0MSw1MzcgMzgsNTI1QzM4LDUyNSAzOCw0NzkgMzgsNDc5QzQzLDQ1NiAzNyw0MjkgNDAsNDI0QzQ1LDQxNCAzMCwyNTYgMTQ5LDE2MkMxNTMsMTU5IDE5MSwxMzYgMTk5LDEzNEMyMDMsMTMyIDI0NiwxMTggMjQ5LDExOEMyNjgsMTE3IDI2NywxMTMgMjg5LDExM0MyOTEsMTEzIDI5MCwxMTEgMjkyLDExMUMzMTEsMTA5IDM3MSwxMDkgMzc1LDExMUMzODEsMTE0IDM4NSwxMTIgMzg3LDExM0MzOTQsMTE3IDM5NSwxMTUgMzk1LDExNUM0MDIsMTE4IDQwMiwxMTYgNDAyLDExN0M0MTEsMTIxIDQzOCwxMjQgNDQyLDEzNFoiIHN0eWxlPSJmaWxsOndoaXRlOyIvPjwvZz48ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDIxMjAuOTE0MDA0LDIxNTAuNTUzNjA1KSI+PHBhdGggZD0iTTQ0NSwxMzJDNDQ3LDEzMCA0NDcsMTI5IDQ0OSwxMzFDNDU0LDEzMyA0NTUsMTMxIDQ1OCwxMzJDNDY4LDEzNyA1ODIsMTU0IDU4MiwyNjNDNTgyLDI2NSA1ODAsMjY1IDU4MCwyNjdDNTc5LDMyMSA1NTQsMzIxIDU0NywzMDVDNTQyLDI5NiA1NTgsMjYxIDU0NywyMjhDNTM2LDE5NiA0OTksMTc1IDUwOCwxODRDNTE2LDE5MyA1MTUsMTk0IDUyMiwyMDRDNTM2LDIyNSA1NDIsMjYxIDU0MiwyNjNDNTQyLDI4OSA1NDEsMjg4IDU0MCwzMDZDNTQwLDMwOSA1MzksMzA4IDUzOSwzMTFDNTM4LDMxNiA1MzgsMzE1IDUzNywzMjFDNTM2LDMyOCA1MzUsMzI3IDUzMywzMzRDNTMzLDMzOSA1MjksMzUwIDUyOCwzNTNDNTI2LDM2NCA1MjEsMzY1IDUyNywzNzVDNTM3LDM4OSA2MDUsNDMyIDU0OCw0NjJDNTQxLDQ2NSA1NDIsNDY2IDU0NSw0NzNDNTU0LDQ5MSA1MzUsNDk1IDUzNyw0OTlDNTUyLDUxOCA1MzAsNTI0IDUzMiw1MzJDNTM1LDU0MyA1MzMsNTYyIDUzMSw1NjRDNTIzLDU4MCA1MjEsNTg1IDUwNCw1OTNDNDk1LDU5OCA0NjMsNTkxIDQ2Myw1OTFDNDQyLDU4MSA0MjcsNTkwIDQyNCw1OTJDNDEyLDU5OSA0MTUsNjAyIDM5MSw2NzVDMzgyLDcwNSAzODMsNzA2IDM4Miw3MDhDMzc5LDcxNSAzODIsNzE3IDM4Myw3MTlDMzgzLDczMiA0MDEsNzQ3IDQwNSw3NTJDNDE3LDc2NCA0MDAsNzczIDM5OSw3NzRDMzkzLDc3NyAyOTcsNzYzIDI5Myw3NjJDMjkwLDc2MiAyNTUsNzA3IDI1NSw3MDVDMjU0LDcwNSAyNTQsNzAyIDI1MSw2OTRDMjI5LDY0MSAyNDcsNTY4IDI0Nyw1MjBDMjQ3LDUwNCAyNDYsNTA1IDI0Miw0ODlDMjQxLDQ4MiAyMjcsNDcyIDIyNSw0NzJDMjEzLDQ2OSAyMTQsNDY4IDIxMiw0NjhDMTg3LDQ2NiAxODIsNDI1IDE4Nyw0MTBDMTk5LDM3MiAyMzQsNDEwIDIzOCw0MTJDMjU4LDQyMyAyNjYsNDE2IDI3Myw0MTNDMjkxLDQwNCAzMzgsMzQ1IDM5MywzNDVDNDMxLDM0NSA0NDEsMzMyIDQ1NiwzMjBDNDU5LDMxNyA0NTksMzE3IDQ2MiwzMTRDNDY0LDMxMiA0NzYsMjk5IDQ4MywyODZDNTA0LDI0MyA0OTgsMjM5IDUwMSwyMzRDNTA0LDIyNiA1MDIsMjIzIDUwMiwyMjFDNTA2LDIxMiA1MDEsMTk0IDUwNSwxODNDNTA3LDE3OCA0NDcsMTM3IDQ0NSwxMzJaIiBzdHlsZT0iZmlsbDp3aGl0ZTsiLz48L2c+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwyMDY4LjI4ODM4MywyMTE1LjcxMDQ3OSkiPjxwYXRoIGQ9Ik04NDMsNDcwQzg0NCw0ODMgODQ1LDQ4MiA4NDUsNDk0Qzg0NSw1MjcgODQ1LDUyNyA4NDIsNTQ2QzgzMyw1OTAgODMxLDU4OSA4MTIsNjI5QzgxMiw2MzAgNzk5LDY0OSA3OTgsNjUwQzc5OCw2NTEgNzc4LDY3NyA3NzAsNjgyQzc2MSw2ODkgNzM0LDY3NyA3NTYsNjU1QzgwNSw2MDYgODQ0LDUwMiA3OTAsNDAxQzc2MSwzNDYgNzMzLDM0NiA3NTUsMzI3Qzc2NywzMTYgNzgxLDMzOCA3OTIsMzUwQzgwMSwzNTkgODM0LDQxNSA4MzcsNDM4QzgzNyw0NDIgODM5LDQ0MiA4NDAsNDUzQzg0MCw0NTQgODQzLDQ2MiA4NDMsNDcwWiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+PC9nPjxnIHRyYW5zZm9ybT0ibWF0cml4KDEsMCwwLDEsMjA2OC4yODgzODMsMjExNS43MTA0NzkpIj48cGF0aCBkPSJNNzI2LDQ3MUM3MjUsNDY4IDcyMCw0NTIgNzE4LDQ1MEM2OTcsNDA3IDY3NCw0MDYgNjk0LDM4OEM3MDIsMzgxIDcxNSwzODkgNzE4LDM5NkM3MjEsNDAyIDczMiw0MDkgNzQ0LDQzNkM3NjMsNDc0IDc2MCw1MTMgNzYwLDUxM0M3NTgsNTE5IDc1Nyw1MzUgNzU3LDUzOEM3NTIsNTYyIDczMiw1OTcgNzI1LDYwNEM3MTUsNjE1IDcxNyw2MTggNzA0LDYyNEM2OTksNjI2IDY4OCw2MTcgNjg4LDYxM0M2ODQsNTkzIDcwNiw1OTQgNzIxLDU1M0M3MjUsNTQwIDcyNSw1NDAgNzI4LDUyN0M3MzMsNDk4IDcyNiw0NzggNzI2LDQ3MVoiIHN0eWxlPSJmaWxsOndoaXRlOyIvPjwvZz48ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDIwNjguMjg4MzgzLDIxMTUuNzEwNDc5KSI+PHBhdGggZD0iTTY1NSw1MTZDNjU1LDUxNCA2NTcsNTA2IDY1NCw0OTFDNjUwLDQ2NyA2MTgsNDUyIDY0Niw0MzdDNjU1LDQzMyA2NzEsNDU0IDY3NSw0NjJDNzA4LDUyNSA2NTcsNTgzIDY0Myw1NjlDNjIwLDU0OCA2NTEsNTQ3IDY1NSw1MTZaIiBzdHlsZT0iZmlsbDp3aGl0ZTsiLz48L2c+PC9nPjxnIHRyYW5zZm9ybT0ibWF0cml4KDEsMCwwLDEsMjA2OC4yODgzODMsMjExNS43MTA0NzkpIj48cGF0aCBkPSJNODQzLDQ3MEM4NDQsNDgzIDg0NSw0ODIgODQ1LDQ5NEM4NDUsNTI3IDg0NSw1MjcgODQyLDU0NkM4MzMsNTkwIDgzMSw1ODkgODEyLDYyOUM4MTIsNjMwIDc5OSw2NDkgNzk4LDY1MEM3OTgsNjUxIDc3OCw2NzcgNzcwLDY4MkM3NjEsNjg5IDczNCw2NzcgNzU2LDY1NUM4MDUsNjA2IDg0NCw1MDIgNzkwLDQwMUM3NjEsMzQ2IDczMywzNDYgNzU1LDMyN0M3NjcsMzE2IDc4MSwzMzggNzkyLDM1MEM4MDEsMzU5IDgzNCw0MTUgODM3LDQzOEM4MzcsNDQyIDgzOSw0NDIgODQwLDQ1M0M4NDAsNDU0IDg0Myw0NjIgODQzLDQ3MFoiIHN0eWxlPSJmaWxsOndoaXRlOyIvPjwvZz48ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDIwNjguMjg4MzgzLDIxMTUuNzEwNDc5KSI+PHBhdGggZD0iTTcyNiw0NzFDNzI1LDQ2OCA3MjAsNDUyIDcxOCw0NTBDNjk3LDQwNyA2NzQsNDA2IDY5NCwzODhDNzAyLDM4MSA3MTUsMzg5IDcxOCwzOTZDNzIxLDQwMiA3MzIsNDA5IDc0NCw0MzZDNzYzLDQ3NCA3NjAsNTEzIDc2MCw1MTNDNzU4LDUxOSA3NTcsNTM1IDc1Nyw1MzhDNzUyLDU2MiA3MzIsNTk3IDcyNSw2MDRDNzE1LDYxNSA3MTcsNjE4IDcwNCw2MjRDNjk5LDYyNiA2ODgsNjE3IDY4OCw2MTNDNjg0LDU5MyA3MDYsNTk0IDcyMSw1NTNDNzI1LDU0MCA3MjUsNTQwIDcyOCw1MjdDNzMzLDQ5OCA3MjYsNDc4IDcyNiw0NzFaIiBzdHlsZT0iZmlsbDp3aGl0ZTsiLz48L2c+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwyMDY4LjI4ODM4MywyMTE1LjcxMDQ3OSkiPjxwYXRoIGQ9Ik02NTUsNTE2QzY1NSw1MTQgNjU3LDUwNiA2NTQsNDkxQzY1MCw0NjcgNjE4LDQ1MiA2NDYsNDM3QzY1NSw0MzMgNjcxLDQ1NCA2NzUsNDYyQzcwOCw1MjUgNjU3LDU4MyA2NDMsNTY5QzYyMCw1NDggNjUxLDU0NyA2NTUsNTE2WiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+PC9nPjwvZz48L3N2Zz4=)";
+        }
+        else
+        {
+            document.getElementById("sound-effects-button").style.backgroundImage = "url(data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+PCFET0NUWVBFIHN2ZyBQVUJMSUMgIi0vL1czQy8vRFREIFNWRyAxLjEvL0VOIiAiaHR0cDovL3d3dy53My5vcmcvR3JhcGhpY3MvU1ZHLzEuMS9EVEQvc3ZnMTEuZHRkIj48c3ZnIHdpZHRoPSIxODJweCIgaGVpZ2h0PSIxNjBweCIgdmVyc2lvbj0iMS4xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB4bWw6c3BhY2U9InByZXNlcnZlIiB4bWxuczpzZXJpZj0iaHR0cDovL3d3dy5zZXJpZi5jb20vIiBzdHlsZT0iZmlsbC1ydWxlOmV2ZW5vZGQ7Y2xpcC1ydWxlOmV2ZW5vZGQ7c3Ryb2tlLWxpbmVqb2luOnJvdW5kO3N0cm9rZS1taXRlcmxpbWl0OjI7Ij48ZyB0cmFuc2Zvcm09Im1hdHJpeCgwLjI0LDAsMCwwLjI0LC01MTguMDg4MjEyLC01NDIuNDU0NDM4KSI+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwyMTIwLjkxNDAwNCwyMTUwLjU1MzYwNSkiPjxwYXRoIGQ9Ik0zMzEsMzM3QzI5NywzNTUgMjk4LDM2MyAyNjIsMzg5QzI1NiwzOTMgMjU1LDM5MyAyNDcsMzg2QzI0MSwzNzkgMjEzLDM2OCAyMDcsMzY4QzIwMSwzNjcgMjAyLDM2OCAxOTUsMzY5QzE0MCwzNzUgMTU2LDQ4NiAyMDEsNDkyQzIyNSw0OTUgMjIyLDUwNiAyMjEsNTQ1QzIyMSw1NDggMjIwLDU0NyAyMjAsNTUwQzIxOSw1NzUgMjE3LDU3NCAyMTYsNTk5QzIxNiw2MDEgMjE1LDYwMiAyMTUsNjA1QzIxMiw2NzkgMjI3LDcxNCAyNTAsNzQ5QzI1Nyw3NTkgMjM5LDc1OCAyMzYsNzU3QzIyNyw3NTMgMTkzLDc1OCAxNDEsNzQwQzEzMiw3MzcgMTMyLDczNiAxMjQsNzMzQzg1LDcyMCA2MSw2ODUgNTcsNjc3QzQyLDY0NiA0Niw2MjcgNDUsNjIzQzQxLDYxMSA0NCw2MDcgNDMsNjAyQzM5LDU5MSA0MSw1MzcgMzgsNTI1QzM4LDUyNSAzOCw0NzkgMzgsNDc5QzQzLDQ1NiAzNyw0MjkgNDAsNDI0QzQ1LDQxNCAzMSwyNjYgMTM5LDE3MUwzMzEsMzM3Wk0xNzksMTQ0QzE4OCwxMzkgMTk1LDEzNSAxOTksMTM0QzIwMywxMzIgMjQ2LDExOCAyNDksMTE4QzI2OCwxMTcgMjY3LDExMyAyODksMTEzQzI5MSwxMTMgMjkwLDExMSAyOTIsMTExQzMxMSwxMDkgMzcxLDEwOSAzNzUsMTExQzM4MSwxMTQgMzg1LDExMiAzODcsMTEzQzM5NCwxMTcgMzk1LDExNSAzOTUsMTE1QzQwMiwxMTggNDAyLDExNiA0MDIsMTE3QzQxMSwxMjEgNDM4LDEyNCA0NDIsMTM0QzQ0MywxMzUgNDQzLDEzNSA0NDksMTQwQzQ1NCwxNDYgNDUzLDE0NiA0NTksMTUyQzQ3MywxNjYgNDcyLDE3MyA0NzUsMTgyQzQ3NiwxODggNDg1LDIyMyA0NjgsMjU4QzQ2NSwyNjMgNDQ2LDMwMiA0MTcsMzE3QzQxNCwzMTggNDAwLDMxOCAzODMsMzIxTDE3OSwxNDRaIiBzdHlsZT0iZmlsbDp3aGl0ZTsiLz48L2c+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwyMTIwLjkxNDAwNCwyMTUwLjU1MzYwNSkiPjxwYXRoIGQ9Ik00MTAsMzQ0QzQzNCwzNDEgNDQzLDMzMCA0NTYsMzIwQzQ1OSwzMTcgNDU5LDMxNyA0NjIsMzE0QzQ2NCwzMTIgNDc2LDI5OSA0ODMsMjg2QzUwNCwyNDMgNDk4LDIzOSA1MDEsMjM0QzUwNCwyMjYgNTAyLDIyMyA1MDIsMjIxQzUwNiwyMTIgNTAxLDE5NCA1MDUsMTgzQzUwNywxNzggNDQ3LDEzNyA0NDUsMTMyQzQ0NywxMzAgNDQ3LDEyOSA0NDksMTMxQzQ1NCwxMzMgNDU1LDEzMSA0NTgsMTMyQzQ2OCwxMzcgNTgyLDE1NCA1ODIsMjYzQzU4MiwyNjUgNTgwLDI2NSA1ODAsMjY3QzU3OSwzMjEgNTU0LDMyMSA1NDcsMzA1QzU0MiwyOTYgNTU4LDI2MSA1NDcsMjI4QzUzNiwxOTYgNDk5LDE3NSA1MDgsMTg0QzUxNiwxOTMgNTE1LDE5NCA1MjIsMjA0QzUzNiwyMjUgNTQyLDI2MSA1NDIsMjYzQzU0MiwyODkgNTQxLDI4OCA1NDAsMzA2QzU0MCwzMDkgNTM5LDMwOCA1MzksMzExQzUzOCwzMTYgNTM4LDMxNSA1MzcsMzIxQzUzNiwzMjggNTM1LDMyNyA1MzMsMzM0QzUzMywzMzkgNTI5LDM1MCA1MjgsMzUzQzUyNiwzNjQgNTIxLDM2NSA1MjcsMzc1QzUzNywzODkgNjA1LDQzMiA1NDgsNDYyQzU0Nyw0NjIgNTQ3LDQ2MiA1NDYsNDYyTDQxMCwzNDRaTTU0MCw1MTlDNTM2LDUyNCA1MzEsNTI3IDUzMiw1MzJDNTM1LDU0MyA1MzMsNTYyIDUzMSw1NjRDNTIzLDU4MCA1MjEsNTg1IDUwNCw1OTNDNDk1LDU5OCA0NjMsNTkxIDQ2Myw1OTFDNDQyLDU4MSA0MjcsNTkwIDQyNCw1OTJDNDEyLDU5OSA0MTUsNjAyIDM5MSw2NzVDMzgyLDcwNSAzODMsNzA2IDM4Miw3MDhDMzc5LDcxNSAzODIsNzE3IDM4Myw3MTlDMzgzLDczMiA0MDEsNzQ3IDQwNSw3NTJDNDE3LDc2NCA0MDAsNzczIDM5OSw3NzRDMzkzLDc3NyAyOTcsNzYzIDI5Myw3NjJDMjkwLDc2MiAyNTUsNzA3IDI1NSw3MDVDMjU0LDcwNSAyNTQsNzAyIDI1MSw2OTRDMjI5LDY0MSAyNDcsNTY4IDI0Nyw1MjBDMjQ3LDUwNCAyNDYsNTA1IDI0Miw0ODlDMjQxLDQ4MiAyMjcsNDcyIDIyNSw0NzJDMjEzLDQ2OSAyMTQsNDY4IDIxMiw0NjhDMTg3LDQ2NiAxODIsNDI1IDE4Nyw0MTBDMTk5LDM3MiAyMzQsNDEwIDIzOCw0MTJDMjU4LDQyMyAyNjYsNDE2IDI3Myw0MTNDMjg2LDQwNyAzMTUsMzczIDM1MiwzNTZMNTQwLDUxOVoiIHN0eWxlPSJmaWxsOndoaXRlOyIvPjwvZz48ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDIwNjguMjg4MzgzLDIxMTUuNzEwNDc5KSI+PHBhdGggZD0iTTg0Myw0NzBDODQ0LDQ4MyA4NDUsNDgyIDg0NSw0OTRDODQ1LDUyNyA4NDUsNTI3IDg0Miw1NDZDODMzLDU5MCA4MzEsNTg5IDgxMiw2MjlDODEyLDYzMCA3OTksNjQ5IDc5OCw2NTBDNzk4LDY1MSA3NzgsNjc3IDc3MCw2ODJDNzYxLDY4OSA3MzQsNjc3IDc1Niw2NTVDODA1LDYwNiA4NDQsNTAyIDc5MCw0MDFDNzYxLDM0NiA3MzMsMzQ2IDc1NSwzMjdDNzY3LDMxNiA3ODEsMzM4IDc5MiwzNTBDODAxLDM1OSA4MzQsNDE1IDgzNyw0MzhDODM3LDQ0MiA4MzksNDQyIDg0MCw0NTNDODQwLDQ1NCA4NDMsNDYyIDg0Myw0NzBaIiBzdHlsZT0iZmlsbDp3aGl0ZTsiLz48L2c+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwyMDY4LjI4ODM4MywyMTE1LjcxMDQ3OSkiPjxwYXRoIGQ9Ik03MjYsNDcxQzcyNSw0NjggNzIwLDQ1MiA3MTgsNDUwQzY5Nyw0MDcgNjc0LDQwNiA2OTQsMzg4QzcwMiwzODEgNzE1LDM4OSA3MTgsMzk2QzcyMSw0MDIgNzMyLDQwOSA3NDQsNDM2Qzc2Myw0NzQgNzYwLDUxMyA3NjAsNTEzQzc1OCw1MTkgNzU3LDUzNSA3NTcsNTM4Qzc1Miw1NjIgNzMyLDU5NyA3MjUsNjA0QzcxNSw2MTUgNzE3LDYxOCA3MDQsNjI0QzY5OSw2MjYgNjg4LDYxNyA2ODgsNjEzQzY4NCw1OTMgNzA2LDU5NCA3MjEsNTUzQzcyNSw1NDAgNzI1LDU0MCA3MjgsNTI3QzczMyw0OTggNzI2LDQ3OCA3MjYsNDcxWiIgc3R5bGU9ImZpbGw6d2hpdGU7Ii8+PC9nPjxnIHRyYW5zZm9ybT0ibWF0cml4KDEsMCwwLDEsMjA2OC4yODgzODMsMjExNS43MTA0NzkpIj48cGF0aCBkPSJNNjU1LDUxNkM2NTUsNTE0IDY1Nyw1MDYgNjU0LDQ5MUM2NTAsNDY3IDYxOCw0NTIgNjQ2LDQzN0M2NTUsNDMzIDY3MSw0NTQgNjc1LDQ2MkM3MDgsNTI1IDY1Nyw1ODMgNjQzLDU2OUM2MjAsNTQ4IDY1MSw1NDcgNjU1LDUxNloiIHN0eWxlPSJmaWxsOndoaXRlOyIvPjwvZz48ZyB0cmFuc2Zvcm09Im1hdHJpeCgwLjY1ODc0OCwwLjU3MjE0LC0wLjY1NTczMiwwLjc1NDk5NCwyODczLjU3MjI1NywtMTEyMy4zODAwNykiPjxyZWN0IHg9IjE5NTIiIHk9IjMwMDMiIHdpZHRoPSIxMDk4IiBoZWlnaHQ9IjQ3IiBzdHlsZT0iZmlsbDp3aGl0ZTsiLz48L2c+PC9nPjwvc3ZnPg==)";
+        }
+
+        if (typeof Android !== 'undefined')
+        {
+            Android.JavaExportSetSoundEffectsStatus(g_are_sound_effects_enabled);
+        }
+
+        // mute the Audio objects so every playback path follows the preference
+        sounds__apply_sound_effects_muted();
+
+        main__sync_toolbar_state_classes();
+    },
+
+    /**
+     * @brief toggles microphone availability and applies the current voice mode
+     *
+     * @return void
+     */
+    activate_continous_audio_broadcast_onclick: function()
+    {
+        voice__set_microphone_always_on(!g_is_microphone_always_on);
+        UI.activate_continous_audio_broadcast_apply();
+    },
+
+    /**
+     * @brief applies the current continuous voice setting to capture, native settings and controls
+     *
+     * @return void
+     */
+    activate_continous_audio_broadcast_apply: function()
+    {
+        if (g_is_running_in_android_webview)
+        {
+            Android.JavaExportSetContinousAudioBroadcastStatus(g_is_microphone_always_on);
+        }
+
+        if (g_is_microphone_always_on)
+        {
+            // an open microphone can send speaker playback back to other users
+            utils__custom_alert("use headphones with continuous transmission, otherwise everyone else hears their own echo");
+            voice__activate_microphone();
+        }
+        else
+        {
+            document.getElementById("microphone-always-broadcasting-audio-button").style.backgroundImage = "url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAIySURBVGhD7ZnBTsMwDIbbSZPQxAmJMXhGXoQnhcGBE0hcALtxqyWNndR2OpD2XZI0ifP/iddWa9858wNQNUsPUNUFt2Al4SleRlyCLBU/4mFiQ6WFayo17KhUY94B7e6PWE/BdAJW8YgQ45b6xFPySCETzAncgfZXrED5AQVr4qwGBPEvVB+QTJjyDwKrU6hW/Cm5OWc5AaX4PVUjVjfAiN8XxD9A8RZaMasaEMQfqT6DxD+H1pzVDLQQj6xioJV4pLmBluKRpgZaizcDQlhoSAqKZ4H++zDMly3FH6BrA3RpBnWn4H2eBftxEDUHoLnFaxK5I46gQBFjakh9CaWH1AGK44J4E64GmMXEnEe4eAgTc8LtR8wsVBRvxWQAND9ReRbxiHg8SOFY8RX3M1QjxJxPGeMV1spiTSGzeCveD7JVxSOeBlYXjxQNpDnI5KRaPBNvQOobqToBiPNIpbf46UkLMWY/4BqKDgtYxN9A8R5aXQ9xvqk+wWxYhMWARfwVFF+hpbt9jmgNuOV8TjxSa0CD2ysxTZlB3U3AnWfB/jBMhoZnoSHVLDmmRWlzmgK1wjRpUztBnfO1aMQjNZP+rHik9CATxcO6B8viMHVjmY9Ik4vioYje92F8s1xfyvBxgQP6i3cbGjpBl93J7oS0YG7nc6QxWu06F3QH6+NHhYiceMlsDVZj0uTIRCreKjxFa6Q0aTABsfHjwvT/vLf4EY0Jlet/bwDxNqERf+GCma77BRNIJZ4nCQCWAAAAAElFTkSuQmCC)";
+            g_is_microphone_available = true;
+            voice__update_microphone_button();
+            voice__process_stop_sending_audio();
+        }
+
+        main__sync_toolbar_state_classes();
+    },
+
+    /**
+     * @brief requests a username change and updates local display state when renaming oneself
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    set_new_username_send_button_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        let new_username = document.getElementById("input-set-new-username").value;
+
+        if (new_username.length == 0)
+        {
+            return;
+        }
+
+        client_msg.send_change_client_username_request(new_username, parseInt(g_selected_client_id));
+
+        // identify the local client by its ID
+        if (parseInt(g_selected_client_id) == g_local_client_id)
+        {
+            let index = channel_tree__get_client_index_in_array_by_client_id(g_local_client_id);
+            g_client_list[index].username = new_username;
+            g_local_username = new_username;
+            {
+                let rename_input = document.getElementById('connected-local-client-input');
+                if (rename_input != null)
+                {
+                    rename_input.setAttribute('value', g_local_username);
+                }
+            }
+        }
+
+        document.getElementById("set-new-username-enter-container").style.display = "none";
+    },
+
+    /**
+     * @brief closes the poke dialog
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    close_button_poke_client_onclick: function(event)
+    {
+        event.stopPropagation();
+        document.getElementById("poke-client-enter-container").style.display = "none";
+    },
+
+    /**
+     * @brief closes the client info popup
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    close_button_client_info_onclick: function(event)
+    {
+        event.stopPropagation();
+        document.getElementById("client-info-container").style.display = "none";
+    },
+
+    /**
+     * @brief lists server bans and their removal controls
+     *
+     * @param array bans -> the bans from server_settings_values
+     *
+     * @return void
+     */
+    render_bans_list: function(bans)
+    {
+        let container = document.getElementById("server-settings-bans-list");
+        if (container == null)
+        {
+            return;
+        }
+
+        container.innerHTML = "";
+
+        if (bans == null || bans.length == 0)
+        {
+            let empty = document.createElement("p");
+            empty.className = "ban-entry-empty";
+            empty.innerText = "no bans";
+            container.appendChild(empty);
+            return;
+        }
+
+        for (let i = 0; i < bans.length; i++)
+        {
+            let ban = bans[i];
+
+            let row = document.createElement("div");
+            row.className = "ban-entry";
+
+            let info = document.createElement("div");
+            info.className = "ban-entry-info";
+
+            let ip_span = document.createElement("span");
+            ip_span.className = "ban-entry-ip";
+            ip_span.innerText = ban.ip_address;
+
+            let meta_span = document.createElement("span");
+            meta_span.className = "ban-entry-meta";
+            meta_span.innerText = (ban.country_iso_code != null && ban.country_iso_code.length > 0) ? ban.country_iso_code : "??";
+
+            let identity_span = document.createElement("span");
+            identity_span.className = "ban-entry-identity";
+            identity_span.innerText = (ban.identity != null) ? ban.identity : "";
+
+            info.appendChild(ip_span);
+            info.appendChild(meta_span);
+            info.appendChild(identity_span);
+
+            let remove_button = document.createElement("div");
+            remove_button.className = "ban-entry-remove";
+            remove_button.innerText = "remove";
+            remove_button.setAttribute("data-ban-ip", ban.ip_address);
+            remove_button.onclick = UI.ban_remove_onclick;
+
+            row.appendChild(info);
+            row.appendChild(remove_button);
+            container.appendChild(row);
+        }
+    },
+
+    /**
+     * @brief requests removing a ban and removes its visible row
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    ban_remove_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        let ip = event.currentTarget.getAttribute("data-ban-ip");
+        if (ip == null)
+        {
+            return;
+        }
+
+        let message_object = {
+            message: {
+                type: "remove_ban",
+                ip_address: ip
+            }
+        };
+
+        connection__send_message_object(message_object);
+
+        // remove the visible row. reopening settings fetches the server list
+        let row = event.currentTarget.parentNode;
+        if (row != null && row.parentNode != null)
+        {
+            row.parentNode.removeChild(row);
+        }
+    },
+
+    /**
+     * @brief closes the username dialog
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    close_button_set_new_username_onclick: function(event)
+    {
+        event.stopPropagation();
+        document.getElementById("set-new-username-enter-container").style.display = "none";
+    },
+
+    /**
+     * @brief stops the song stream and restores the upload control
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    stop_song_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        document.getElementById("custom-file-upload-button-song").style.display = "inline-block";
+        document.getElementById("stop-song").style.display = "none";
+
+        let message_object1 = {
+            message:
+            {
+                type: "stop_song_stream"
+            }
+        };
+
+        connection__send_message_object(message_object1);
+    },
+
+    /**
+     * @brief clicking a toast hides it (and suppresses the link default)
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    a_toast_onclick: function(event)
+    {
+        event.preventDefault();
+        event.target.style.visibility = "hidden";
+    },
+
+    /**
+     * @brief closes the music bot management dialog
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    musicbot_management_close_button_onclick: function(event)
+    {
+        event.stopPropagation();
+        document.getElementById("musicbot-management-background-container").style.display = "none";
+    },
+
+    /**
+     * @brief validates the MP3 size and uploads it to the selected music bot
+     *
+     * @param object event -> the mouse event
+     *
+     * @return void
+     */
+    musicbot_management_confirm_upload_button_onclick: function(event)
+    {
+        event.stopPropagation();
+
+        let fileInput = document.getElementById('musicbot-management-background-container-file-input');
+        let files = fileInput.files;
+
+        for (let x = 0; x < files.length; x++)
+        {
+            if (x == 0)
+            {
+                let file = files[x];
+                let max_size = 10 * 1024 * 1024;
+
+                if (file.size > max_size)
+                {
+                    utils__custom_alert("mp3 is too large. Max size: 10mb");
+                    return;
+                }
+
+                let reader = new FileReader();
+                reader.onload = function (event)
+                {
+                    // keep song bytes separate from the pending chat picture
+                    let song_base64 = chat__remove_data_url_prefix_from_base64_string(event.target.result);
+                    let total_bytes_length = song_base64.length;
+                    let parts = chat__split_upload_into_chunks(song_base64);
+
+                    if (chat__can_start_file_upload() == true)
+                    {
+                        g_file_send_intent = "musicbot_file";
+
+                        g_file_send_intent_extra_data = {
+                            song_name : files[x].name,
+                            musicbot_id: parseInt(g_selected_client_id)
+                        };
+
+                        chat__send_file_by_parts(parts, total_bytes_length, 5);
+                    }
+                }
+                reader.readAsDataURL(file); // invokes onload
+            }
+        }
+    }
+};
+
+var webrtc = {
+    /**
+     * @brief sends each newly gathered ice candidate to the server through the signaling websocket
+     *
+     * @param object event -> the RTCPeerConnectionIceEvent
+     *
+     * @return void
+     */
+    peerconnection_handle_ice_candidate_event: function(event)
+    {
+        if (event.candidate)
+        {
+            console.log(event.candidate);
+
+            console.log("send_ice_candidate_to_server");
+
+            let message_object = {
+                message: {
+                    type: "ice_candidate",
+                    value: event.candidate
+                }
+            };
+
+            // do not log request bodies: some contain passwords or private content
+
+            connection__send_message_object(message_object);
+        }
+    },
+
+    /**
+     * @brief logs ice connection state changes, for debugging
+     *
+     * @param object event -> the event
+     *
+     * @return void
+     */
+    peerconnection_handle_ice_connection_state_change_event: function(event)
+    {
+        console.log("peerconnection_handle_ice_connection_state_change_event " + event.target.iceConnectionState);
+    },
+
+    /**
+     * @brief logs when ice candidate gathering begins and when it is finished
+     *
+     * @param object event -> the event
+     *
+     * @return void
+     */
+    peerconnection_handle_ice_gathering_state_change_event: function(event)
+    {
+        switch (event.target.iceGatheringState)
+        {
+            case "gethering":
+                console.log("collection of candinates has begun");
+                break;
+
+            case "complete":
+                console.log("collection of candinates is finished");
+                break;
+        }
+    },
+
+    /**
+     * @brief logs signaling state changes, for debugging
+     *
+     * @param object event -> the event
+     *
+     * @return void
+     */
+    peerconnection_handle_signaling_state_change_event: function(event)
+    {
+        console.log("peerconnection_handle_signaling_state_change_event : " + event.target.signalingState);
+    },
+
+    /**
+     * @brief logs that negotiation is needed. no renegotiation is started here
+     *
+     * @param object event -> the event
+     *
+     * @return void
+     */
+    peerconnection_handle_negotiation_needed_event: function(event)
+    {
+        console.log("negotiation needed");
+    },
+
+    /**
+     * @brief logs the overall peer connection state whenever it changes
+     *
+     * @return void
+     */
+    peer_connection_handle_onconnection_state_change_event: function()
+    {
+        if (g_peer_connection_with_server != null)
+        {
+            console.log("peer_connection_with_server connectionState changed to " + g_peer_connection_with_server.connectionState);
+        }
+    },
+
+    /**
+     * @brief attaches handlers only to a data channel from the current peer connection
+     *
+     * @param object event -> the RTCDataChannelEvent
+     *
+     * @return void
+     */
+    peerconnection_on_datachannel_receive: function(event)
+    {
+        // reject data channels from replaced peer connections
+        if (event.currentTarget !== g_peer_connection_with_server)
+        {
+            console.log("datachannel from a replaced peer connection ignored");
+            try
+            {
+                event.channel.close();
+            }
+            catch (stale_channel_close_error)
+            {
+            }
+            return;
+        }
+
+        // keep the video data channel separate from the audio channel
+        if (event.channel.label == "video")
+        {
+            video__on_datachannel_received(event.channel);
+            return;
+        }
+
+        g_datachannel = event.channel;
+        console.log(`"DataChannel received with label "${event.channel.label}"`);
+        event.channel.onopen = webrtc.datachannel_onopen;
+        event.channel.onclose = webrtc.datachannel_onclose;
+        event.channel.onmessage = webrtc.datachannel_onmessage;
+        event.channel.binaryType = "arraybuffer";
+        g_is_webrtc_datachannel_connected = true;
+
+        // capture may start before the audio connection is ready
+        if (g_is_microphone_always_on && g_audio_transport.mode !== "none" && g_audio_transport.ready === false)
+        {
+            voice__activate_microphone();
+        }
+    },
+
+    /**
+     * @brief initializes microphone controls when the audio data channel opens
+     *
+     * @return void
+     */
+    datachannel_onopen: function()
+    {
+        audio_transport__on_datachannel_open();
+
+    },
+
+    /**
+     * @brief clears a closed current data channel and schedules connection recovery
+     *
+     * @param object event -> the event
+     *
+     * @return void
+     */
+    datachannel_onclose: function(event)
+    {
+        console.log("daatachannel_onclose");
+
+        // ignore close events from replaced or cleared channels
+        if (event != null && event.target !== g_datachannel)
+        {
+            return;
+        }
+
+        if (audio_transport__active() == null)
+        {
+            g_is_microphone_available = false;
+            voice__update_microphone_button();
+            document.getElementById("toggle-microphone-label").style.display = "none";
+        }
+
+        // recover on local close even if the server's audio status update was missed
+        g_is_webrtc_datachannel_connected = false;
+
+        if (g_is_voice_chat_allowed_by_server == true && g_is_deep_idle == false && g_is_webrtc_datachannel_check_running == false)
+        {
+            g_is_webrtc_datachannel_check_running = true;
+            voice__webrtc_datachannel_connection_check(true);
+        }
+    },
+
+    /**
+     * @brief passes the current audio data channel frame to the shared receive path
+     *
+     * @param object event -> the MessageEvent, event.data is the ArrayBuffer
+     *
+     * @return void
+     */
+    datachannel_onmessage: function(event)
+    {
+        if (event.target === g_datachannel)
+        {
+            audio_transport__on_datachannel_message(event.data);
+        }
+    }
+}

@@ -6,7 +6,7 @@
 
 <p align="center"><b>What if Lemon Chat worked on IRC?</b></p>
 
-This project answers that question. It takes the Lemon Chat web client, with its channel tree, themes, sounds and layout, and connects it to ordinary IRC networks such as Libera.Chat, OFTC and Rizon. A small Node.js bridge on your computer carries the connection, so the client runs in any modern browser or as a desktop app.
+This project answers that question. It takes the Lemon Chat web client, with its channel tree, themes, sounds and layout, and connects it to ordinary IRC networks such as Libera.Chat, OFTC and Rizon.
 
 ![Lemon IRC with the Default theme](docs/images/default.png)
 
@@ -31,16 +31,11 @@ Each release has two files:
 | Windows 10 and 11 | `lemon-chat-irc-<version>-portable-x64.exe` | Double-click it. Nothing is installed. |
 | Linux (x86-64) | `lemon-chat-irc-<version>-linux-x86_64.AppImage` | Run `chmod +x` on the file, then start it. |
 
-The desktop app contains the bridge and the client, and it doesn't need Node.js. Windows can show a SmartScreen warning the first time, because the file isn't code-signed. Choose **More info → Run anyway**.
+The desktop app doesn't need Node.js. Windows can show a SmartScreen warning the first time, because the file isn't code-signed. Choose **More info → Run anyway**.
 
 ## Run from source
 
-1. Install [Node.js](https://nodejs.org) 24 or later.
-2. Start `start.bat` on Windows, or `sh start.sh` on Linux and macOS.
-3. Your browser opens `http://127.0.0.1:19167/`.
-4. Click the globe in the toolbar, choose a network, enter a nickname and press **connect**.
-
-Running from source needs no `npm install`. The WebSocket library is included in `vendor/ws`.
+Run `start.bat` on Windows or `sh start.sh` on Linux and macOS. The script downloads Node.js into `.tools` if your computer doesn't have it, then opens the client in your browser.
 
 ## Screenshots
 
@@ -72,7 +67,7 @@ Running from source needs no `npm install`. The WebSocket library is included in
 | Linux | `bash build-linux.sh` | `.AppImage` |
 | macOS | `bash build-mac.sh` | `.dmg` for Intel and Apple silicon |
 
-Each script checks for Node.js 22.12 or later, installs the locked build dependencies with `npm ci` and packages the app. The Windows and Linux packages can also be built on Linux. See [Desktop app and releases](docs/desktop-app.md).
+Each script downloads Node.js into `.tools` if needed, installs the locked build dependencies with `npm ci` and packages the app. The Windows and Linux packages can also be built on Linux. See [Desktop app and releases](docs/desktop-app.md).
 
 ## Project status
 
