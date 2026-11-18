@@ -32,6 +32,36 @@ function loadConfig()
 }
 
 /**
+ * @brief shows the right-click menu of a text field that a browser shows: spelling suggestions for a misspelled
+ *        word, then cut, copy, paste and select all. Electron shows no right-click menu by itself. Paste also pastes
+ *        a picture from the clipboard in the same way as Ctrl+V. The page lets this event through only in text fields
+ *
+ * @param object params -> the parameters of the context-menu event of Electron
+ *
+ * @return void
+ */
+function showTextFieldMenu(params)
+{
+    // text field only
+    if (!params.isEditable || !mainWindow || mainWindow.isDestroyed())
+    {
+        return;
+    }
+
+    // spelling suggestions
+    const items = params.dictionarySuggestions.map(word => ({label: word, click: () => mainWindow.webContents.replaceMisspelling(word)}));
+    if (items.length)
+    {
+        items.push({type: 'separator'});
+    }
+
+    // menu at the pointer
+    items.push({role: 'cut', enabled: params.editFlags.canCut}, {role: 'copy', enabled: params.editFlags.canCopy}, {role: 'paste'},
+        {type: 'separator'}, {role: 'selectAll'});
+    Menu.buildFromTemplate(items).popup({window: mainWindow});
+}
+
+/**
  * @brief opens the client window on the bridge's full local address, including its token
  *
  * @return void
@@ -76,6 +106,11 @@ function createWindow()
             }
         }
     });
+    // right-click menu in text fields
+    mainWindow.webContents.on('context-menu', (event, params) =>
+    {
+        showTextFieldMenu(params);
+    });
     mainWindow.on('closed', () =>
     {
         mainWindow = null;
@@ -99,6 +134,8 @@ app.whenReady().then(async () =>
 {
     Menu.setApplicationMenu(Menu.buildFromTemplate([
         {label: 'File', submenu: [{role: 'quit'}]},
+        // the Edit roles give cut, copy and paste their keyboard keys, which macOS needs
+        {label: 'Edit', submenu: [{role: 'undo'}, {role: 'redo'}, {type: 'separator'}, {role: 'cut'}, {role: 'copy'}, {role: 'paste'}, {role: 'selectAll'}]},
         {label: 'View', submenu: [{role: 'reload'}, {role: 'forceReload'}, {role: 'toggleDevTools'}, {type: 'separator'}, {role: 'resetZoom'}, {role: 'zoomIn'}, {role: 'zoomOut'}, {type: 'separator'}, {role: 'togglefullscreen'}]}
     ]));
     try
