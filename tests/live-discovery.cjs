@@ -34,6 +34,8 @@ const {createBridge} = require('../bridge/server.cjs');
             if (index === 0)
             {
                 await page.locator('#irc-nickname').fill(preferred);
+                await page.locator('#irc-username').fill('tester');
+                await page.locator('#irc-realname').fill('Lemon Tester');
             }
             else
             {

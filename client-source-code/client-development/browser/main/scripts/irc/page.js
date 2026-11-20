@@ -30,7 +30,14 @@ document.addEventListener('DOMContentLoaded', () =>
     let connectDrag = null;
     let connectFormRevision = 0;
     const messageRows = new WeakMap();
-    const preferences = {avatars: true, flags: true, previews: true, site_previews: false, typing: true, channel_counts: true, roles: true, activity: true, joined_first: true};
+    const preferences = {avatars: true, flags: true, previews: true, site_previews: false, typing: true, channel_counts: true, roles: true, activity: true, joined_first: true, save_history: false, show_history: true, project_address: true, reconnect: true, join_last_channels: false};
+    // preferences that stay off until the user turns them on
+    const preferencesOffByDefault = ['site_previews', 'save_history', 'join_last_channels'];
+    // messages waiting to be written to conversations.sqlite by the bridge
+    const historyQueue = [];
+    let historyTimer = 0;
+    let historyLines = 100;
+    let is_history_failure_shown = false;
     const soundOptions = [['connected', 'connected to server'], ['disconnected', 'disconnected from server'], ['connection_lost', 'connection lost'], ['channel_switched', 'joined a channel'], ['user_entered_your_channel', 'someone joined your channel'], ['user_left_your_channel', 'someone left your channel'], ['user_disconnected_from_your_channel', 'someone disconnected'], ['channel_edited', 'channel topic changed'], ['user_was_kicked_out_of_your_channel', 'someone was kicked'], ['incoming_channel', 'channel message received'], ['incoming_private', 'private message received'], ['message_sent', 'message sent'], ['error', 'action failed']];
     const soundPreferences = Object.fromEntries(soundOptions.map(([name]) => [name, utils__storage_get('sound_' + name) === null ? name !== 'message_sent' : utils__storage_get('sound_' + name) !== 'false']));
     let eventLocation = utils__storage_get('event_location') === 'log' ? 'log' : 'chat';
@@ -42,6 +49,20 @@ document.addEventListener('DOMContentLoaded', () =>
         memberSort = 'name-asc';
     }
     let lastChannel = null;
+    // a channel joined by this user, scrolled into view by the next channel list drawing
+    let channelToReveal = '';
+    // a saved own server chosen in the server list, instead of a listed one
+    let selectedServer = null;
+    // server and login of the last connection, kept in memory only, for reconnecting
+    let lastConnection = null;
+    // automatic reconnect: waiting times in seconds, timers, and channels to join again
+    const reconnectDelays = [5, 10, 30, 60, 120];
+    const reconnect = {timer: 0, tick: 0, attempt: 0, at: 0, channels: []};
+    // channels being joined again after a reconnect, which keep the current conversation
+    const rejoining = new Set();
+    // channel passwords typed in this session, by folded channel name
+    const channelKeys = new Map();
+    let channelSaveTimer = 0;
     const input = byId('chat-input-container-text-input');
     const logPanel = byId('textarea-log');
     const logButton = byId('show-hide-log-button');
@@ -59,7 +80,21 @@ document.addEventListener('DOMContentLoaded', () =>
         channelSort = 'name-asc';
     }
     const sessions = new Map();
-    const identityStorage = {read: () => utils__storage_get('identities'), write: value => utils__storage_set('identities', value)};
+    // saved identities: the page encrypts them with the master password, the bridge stores identities.lemon
+    const identityVault = {is_existing: false, is_unlocked: false, key: null, salt: null, file: null, profiles: '[]', passwords: {}, servers: [], saving: Promise.resolve()};
+    const identityStorage =
+    {
+        read: () => identityVault.is_unlocked ? identityVault.profiles : '[]',
+        write: value =>
+        {
+            if (identityVault.is_unlocked)
+            {
+                identityVault.profiles = value;
+                saveIdentities();
+            }
+        }
+    };
+    const identityFileReady = readIdentityFile();
     const sendLine = line =>
     {
         if (!socket || socket.readyState !== WebSocket.OPEN)
@@ -69,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () =>
         socket.send(line);
     };
     let client = new LemonIrc.Client(sendLine, schedule);
+    client.onMessage = queueHistory;
     window.ircClient = client;
     const conversationPicker = LemonIrc.createConversationPicker({make, choose: activate, current: () => current, conversations: () => client.conversations, newChat: nick => newPrivateChat(nick)});
     const treeView = new LemonIrc.Tree(byId('channel-list-container'), treeRow);
@@ -235,6 +271,7 @@ document.addEventListener('DOMContentLoaded', () =>
             applyLayout();
         }
         input.value = client.conversation(id).draft;
+        loadHistory(client, id);
         render(isMobileTheme());
     }
 
@@ -617,7 +654,7 @@ document.addEventListener('DOMContentLoaded', () =>
     {
         const toolbar = byId('communication-system-head-menu');
         logPanel.style.top = document.body.dataset.ircTheme === 'termix' ? '' : Math.max(0, toolbar.getBoundingClientRect().bottom) + 'px';
-        const optional = ['microphone-always-broadcasting-audio-button', 'hide-show-flags-button', 'sound-effects-button', 'irc-network-browser-button'];
+        const optional = ['microphone-always-broadcasting-audio-button', 'hide-show-flags-button', 'sound-effects-button', 'irc-network-browser-button', 'irc-command-window-button'];
         const buttons = [...toolbar.querySelectorAll(':scope > input[type="button"]')];
         const transitions = new Map(buttons.map(node => [node, node.style.transition]));
         for (const node of buttons)
@@ -652,9 +689,10 @@ document.addEventListener('DOMContentLoaded', () =>
     {
         const panel = document.createElement('dialog');
         panel.className = 'irc-dialog';
+        // the title bar of the original client windows, so every theme draws it like its own
         const heading = make('div', '', 'irc-dialog-heading');
-        // the themes' close button, the same one the connection window uses
-        const close = make('div', '', 'close-button irc-dialog-close');
+        heading.id = 'menu-bar-container';
+        const close = make('div', '', 'close-button');
         close.setAttribute('role', 'button');
         close.setAttribute('aria-label', 'Close');
         close.title = 'close';
@@ -668,7 +706,7 @@ document.addEventListener('DOMContentLoaded', () =>
                 panel.close();
             }
         };
-        heading.append(make('p', title), close);
+        heading.append(make('p', title, 'dialog-title'), close);
         panel.append(heading);
         panel.addEventListener('close', () => panel.remove());
         document.body.append(panel);
@@ -725,15 +763,61 @@ document.addEventListener('DOMContentLoaded', () =>
         const results = make('div', '', 'irc-network-results');
         panel.append(results);
         const networks = await loadNetworks(true);
+        await identityFileReady;
         if (!panel.isConnected)
         {
             return;
+        }
+
+        // own saved servers first
+        if (identityVault.is_unlocked && identityVault.servers.length)
+        {
+            results.append(make('p', 'Saved servers', 'irc-network-heading'));
+            for (const server of identityVault.servers)
+            {
+                const key = LemonIrc.Identities.serverKey(server);
+                const row = document.createElement('button');
+                row.type = 'button';
+                row.className = 'irc-network-row' + (selectedServer && LemonIrc.Identities.serverKey(selectedServer) === key ? ' irc-network-current' : '');
+                row.setAttribute('aria-label', 'Choose ' + server.name);
+                row.append(make('span', server.name, 'irc-network-name'), make('span', server.host + ':' + server.port + (server.tls ? '' : ' · unencrypted') + (identityVault.passwords['server ' + key] ? ' · password saved' : ''), 'irc-network-host'));
+                row.onclick = () =>
+                {
+                    selectedServer = server;
+                    panel.close();
+                    connect();
+                };
+                const remove = button('Delete', () =>
+                {
+                    if (confirm('Delete the saved server ' + server.name + '? This cannot be undone.'))
+                    {
+                        identityVault.servers = identityVault.servers.filter(entry => entry !== server);
+                        delete identityVault.passwords['server ' + key];
+                        saveIdentities();
+                        panel.close();
+                        networkBrowser();
+                    }
+                });
+                remove.ariaLabel = 'Delete saved server ' + server.name;
+                const line = make('div', '', 'irc-saved-server');
+                line.append(row, remove);
+                results.append(line);
+            }
+            results.append(make('p', 'Listed servers', 'irc-network-heading'));
+        }
+        else if (identityVault.is_existing && !identityVault.is_unlocked)
+        {
+            results.append(button('Unlock saved identities to show saved servers', () => unlockIdentities(() =>
+            {
+                panel.close();
+                networkBrowser();
+            })));
         }
         for (const network of networks)
         {
             const row = document.createElement('button');
             row.type = 'button';
-            row.className = 'irc-network-row' + (network.id === selectedNetwork ? ' irc-network-current' : '');
+            row.className = 'irc-network-row' + (!selectedServer && network.id === selectedNetwork ? ' irc-network-current' : '');
             row.setAttribute('aria-label', 'Choose ' + network.name);
             row.title = [network.description, network.sources?.length ? 'listed by ' + network.sources.join(', ') : ''].filter(Boolean).join('\n');
             const host = network.ready === false ? 'server found when chosen' : network.host + (network.tls ? '' : ' · unencrypted');
@@ -773,6 +857,7 @@ document.addEventListener('DOMContentLoaded', () =>
                     byId('irc-password').value = '';
                 }
                 selectedNetwork = network.id;
+                selectedServer = null;
                 panel.close();
                 connect();
             };
@@ -794,11 +879,16 @@ document.addEventListener('DOMContentLoaded', () =>
         {
             return;
         }
+
+        // keep the toolbar reachable
+        const minimumTop = Math.max(8, byId('communication-system-head-menu').getBoundingClientRect().bottom + 8);
+        box.style.maxHeight = Math.max(200, innerHeight - minimumTop - 8) + 'px';
+        box.style.overflowY = 'auto';
         const rect = box.getBoundingClientRect();
         const left = center ? (innerWidth - rect.width) / 2 : rect.left;
         const top = center ? (innerHeight - rect.height) / 2 : rect.top;
         box.style.left = Math.max(8, Math.min(left, innerWidth - rect.width - 8)) + 'px';
-        box.style.top = Math.max(8, Math.min(top, innerHeight - rect.height - 8)) + 'px';
+        box.style.top = Math.max(minimumTop, Math.min(top, innerHeight - rect.height - 8)) + 'px';
     }
 
     /**
@@ -812,6 +902,13 @@ document.addEventListener('DOMContentLoaded', () =>
         byId('verification-system').style.visibility = 'visible';
         byId('verification-system').style.display = client.connected ? 'none' : 'block';
         byId('connect-window-close-button').style.display = '';
+
+        // spinner while connecting
+        const spinner = byId('irc-connect-spinner');
+        if (spinner)
+        {
+            spinner.style.display = socket && socket.readyState <= WebSocket.OPEN && !client.connected ? 'inline-block' : 'none';
+        }
         if (client.connected)
         {
             connectFormRevision++;
@@ -902,6 +999,7 @@ document.addEventListener('DOMContentLoaded', () =>
         try
         {
             await loadNetworks();
+            await identityFileReady;
         }
         catch (error)
         {
@@ -919,10 +1017,14 @@ document.addEventListener('DOMContentLoaded', () =>
         const nickname = byId('irc-nickname');
         const account = byId('irc-account');
         const password = byId('irc-password');
-        const network = networkList.find(entry => entry.id === selectedNetwork);
-        byId('input-ip-address').value = network.host;
-        byId('input-port-number').value = network.port;
-        byId('connect-server-section').querySelector('legend').textContent = network.name;
+        const network = selectedServer || networkList.find(entry => entry.id === selectedNetwork);
+        byId('input-ip-address').value = network.host || '';
+        byId('input-port-number').value = network.port || '';
+        serverTls.checked = Boolean(network.tls);
+        serverPassword.value = network.host ? identityVault.passwords['server ' + LemonIrc.Identities.serverKey(network)] || '' : '';
+        serverPasswordToggle.checked = Boolean(serverPassword.value);
+        serverPasswordRow.forEach(node => node.hidden = !serverPasswordToggle.checked);
+        showServerName();
         nickname.value = utils__storage_get('preferred_nickname') || 'Lemon' + Math.floor(Math.random() * 100000);
         const profiles = LemonIrc.Identities.list(identityStorage, network);
         identitySelector.replaceChildren();
@@ -932,16 +1034,33 @@ document.addEventListener('DOMContentLoaded', () =>
             identitySelector.append(new Option(profile.nick + ' · ' + profile.account, profile.account));
         }
         identitySelector.append(new Option('Another account…', '*new*'));
+        if (!identityVault.is_unlocked)
+        {
+            identitySelector.append(new Option(identityVault.is_existing ? 'Unlock saved identities…' : 'Create saved identities…', '*unlock*'));
+        }
         identitySelector.value = profiles.find(profile => profile.selected)?.account || '';
         const selectIdentity = () =>
         {
+            // unlock saved identities
+            if (identitySelector.value === '*unlock*')
+            {
+                identitySelector.value = '';
+                unlockIdentities(() => connect());
+            }
             const profile = profiles.find(entry => entry.account === identitySelector.value);
             account.value = profile?.account || '';
-            password.value = '';
+            password.value = profile?.account ? identityVault.passwords[LemonIrc.Identities.passwordKey(network, profile.account)] || '' : '';
+            savePassword.checked = Boolean(password.value);
+            savePassword.disabled = !identityVault.is_unlocked;
             if (profile)
             {
                 nickname.value = profile.nick;
             }
+
+            // fill the user fields
+            const last = profiles.find(entry => entry.selected && entry.username);
+            username.value = profile?.username || last?.username || utils__storage_get('preferred_username') || '';
+            realname.value = profile?.realname || last?.realname || utils__storage_get('preferred_realname') || '';
             const registered = identitySelector.value !== '';
             byId('connect-show-advanced').checked = registered;
             credentials.hidden = !registered;
@@ -950,6 +1069,7 @@ document.addEventListener('DOMContentLoaded', () =>
         identitySelector.onchange = selectIdentity;
         forgetIdentity.onclick = () =>
         {
+            delete identityVault.passwords[LemonIrc.Identities.passwordKey(network, identitySelector.value)];
             LemonIrc.Identities.forget(identityStorage, network, identitySelector.value);
             connect();
         };
@@ -966,12 +1086,11 @@ document.addEventListener('DOMContentLoaded', () =>
                 playEventSound('error');
                 return;
             }
-            const check = new LemonIrc.Client(() =>
-            {
-            });
+            // the typed or chosen server
+            let target;
             try
             {
-                check.register(nickname.value.trim(), account.value.trim(), password.value);
+                target = serverFromFields();
             }
             catch (error)
             {
@@ -979,120 +1098,423 @@ document.addEventListener('DOMContentLoaded', () =>
                 playEventSound('error');
                 return;
             }
-            const old = socket;
-            socket = null;
-            old?.close();
-            client.connected = false;
-            client.listing = false;
-            client.pendingDirectory = null;
-            client.password = '';
-            client.conversation(current).draft = input.value;
-            for (const channel of client.channels.values())
+            const check = new LemonIrc.Client(() =>
             {
-                channel.joined = false;
-                channel.members.clear();
-                channel.names = null;
-            }
-            if (activeNetwork && activeNetwork !== network.id)
+            });
+            try
             {
-                sessions.set(activeNetwork, client);
-                client = sessions.get(network.id) || new LemonIrc.Client(sendLine, schedule);
-                window.ircClient = client;
-                current = 'network';
-                input.value = client.conversation(current).draft;
+                check.register(nickname.value.trim(), account.value.trim(), password.value, username.value.trim(), realname.value.trim(), serverPassword.value);
             }
-            activeNetwork = network.id;
-            client.ignoredNicks = loadIgnored(network.id);
-            renderIgnoredList();
-            networkCollapsed = false;
-            client.network = network.name;
-            client.capabilities = [];
-            client.listing = false;
-            client.pendingDirectory = null;
-            for (const channel of client.channels.values())
+            catch (error)
             {
-                channel.joined = false;
-                channel.members.clear();
-                channel.names = null;
+                errorText.textContent = error.message;
+                playEventSound('error');
+                return;
             }
-            const loginNickname = nickname.value.trim();
-            utils__storage_set('preferred_nickname', loginNickname);
-            const loginAccount = account.value.trim();
-            LemonIrc.Identities.remember(identityStorage, network, loginNickname, loginAccount);
-            let loginPassword = password.value;
-            let connectionError = '';
+            const login = {nickname: nickname.value.trim(), account: account.value.trim(), password: password.value, username: username.value.trim(), realname: realname.value.trim(), serverPassword: serverPassword.value};
+            utils__storage_set('preferred_nickname', login.nickname);
+            LemonIrc.Identities.remember(identityStorage, target, login.nickname, login.account);
+            LemonIrc.Identities.rememberUser(identityStorage, target, login.account, login.username, login.realname);
+            utils__storage_set('preferred_username', login.username);
+            utils__storage_set('preferred_realname', login.realname);
+
+            // saved password
+            if (identityVault.is_unlocked && login.account)
+            {
+                const passwordName = LemonIrc.Identities.passwordKey(target, login.account);
+                if (savePassword.checked && password.value)
+                {
+                    identityVault.passwords[passwordName] = password.value;
+                }
+                else if (!savePassword.checked)
+                {
+                    delete identityVault.passwords[passwordName];
+                }
+                saveIdentities();
+            }
             password.value = '';
-            const next = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/irc?token=' + token + '&network=' + encodeURIComponent(network.id), 'text.ircv3.net');
-            socket = next;
-            disconnectedByUser = false;
-            next.onopen = () =>
+
+            // a new connection ends a waiting reconnect
+            if (lastConnection?.target.id !== target.id)
             {
-                if (socket === next)
-                {
-                    guard(() => client.register(loginNickname, loginAccount, loginPassword));
-                }
-                loginPassword = '';
-            };
-            next.onmessage = event =>
-            {
-                if (socket === next)
-                {
-                    try
-                    {
-                        receive(event.data);
-                    }
-                    catch (error)
-                    {
-                        if (!client.connected)
-                        {
-                            connectionError = error.message;
-                            next.close();
-                        }
-                        report(error);
-                    }
-                }
-            };
-            next.onerror = () =>
-            {
-                if (socket === next)
-                {
-                    connectionError = 'The bridge connection failed. Check that it is running.';
-                    report(new Error(connectionError));
-                }
-            };
-            next.onclose = event =>
-            {
-                loginPassword = '';
-                if (socket === next)
-                {
-                    client.connected = false;
-                    client.listing = false;
-                    client.pendingDirectory = null;
-                    playEventSound(disconnectedByUser ? 'disconnected' : 'connection_lost');
-                    client.password = '';
-                    for (const channel of client.channels.values())
-                    {
-                        channel.joined = false;
-                        channel.members.clear();
-                        channel.names = null;
-                        channel.membersUpdated = 0;
-                    }
-                    for (const dialog of document.querySelectorAll('dialog[open]'))
-                    {
-                        dialog.close();
-                    }
-                    showConnectionState();
-                    report(new Error(connectionError || event.reason || (disconnectedByUser ? 'Disconnected. Choose Connect to reconnect.' : 'Connection lost. Choose Connect to reconnect.')), true, false);
-                }
-            };
-            showConnectionState();
-            errorText.textContent = 'Connecting to ' + network.name + '…';
-            client.status(errorText.textContent);
-            schedule();
+                reconnect.channels = [];
+            }
+            stopReconnect();
+            openConnection(target, login);
         };
         nickname.focus();
         fitConnectionWindow(true);
     }
+
+    /**
+     * @brief reads the server fields of the connect window
+     *
+     * @return object listed server when the fields match one, otherwise {id, name, host, port, tls, is_custom}
+     */
+    function serverFromFields()
+    {
+        const host = byId('input-ip-address').value.trim().replace(/^\[|\]$/g, '');
+        const port = Number(byId('input-port-number').value.trim());
+        const tls = byId('irc-server-tls').checked;
+
+        // check the fields
+        if (!/^[A-Za-z0-9.\-:]{1,253}$/.test(host))
+        {
+            throw new Error('Enter a server address such as irc.libera.chat.');
+        }
+        if (!Number.isInteger(port) || port < 1 || port > 65535)
+        {
+            throw new Error('Enter a port between 1 and 65535.');
+        }
+
+        // a listed server keeps its own name and id
+        const is_same = entry => entry.host && entry.host.toLowerCase() === host.toLowerCase() && Number(entry.port) === port && Boolean(entry.tls) === tls;
+        const chosen = !selectedServer && (networkList || []).find(entry => entry.id === selectedNetwork);
+        const listed = chosen && is_same(chosen) ? chosen : (networkList || []).find(entry => entry.ready !== false && is_same(entry));
+        if (listed)
+        {
+            return listed;
+        }
+        const saved = identityVault.servers.find(is_same);
+        return {id: 'custom:' + host.toLowerCase() + ':' + port + ':' + tls, name: saved?.name || host, host, port, tls, is_custom: true};
+    }
+
+    /**
+     * @brief shows the name of the typed or chosen server above its fields
+     *
+     * @return void
+     */
+    function showServerName()
+    {
+        const legend = byId('connect-server-section').querySelector('legend');
+        try
+        {
+            const target = serverFromFields();
+            legend.textContent = target.is_custom ? 'own server · ' + target.name : target.name;
+        }
+        catch (error)
+        {
+            legend.textContent = 'server';
+        }
+    }
+
+    /**
+     * @brief keeps the typed server and its password in identities.lemon, at the top of the server list
+     *
+     * @return void
+     */
+    function saveServer()
+    {
+        const status = byId('another-buttons-loading-container-p');
+        let target;
+        try
+        {
+            target = serverFromFields();
+        }
+        catch (error)
+        {
+            status.textContent = error.message;
+            playEventSound('error');
+            return;
+        }
+
+        // saving needs the identities unlocked
+        if (!identityVault.is_unlocked)
+        {
+            unlockIdentities(() => saveServer());
+            return;
+        }
+        const key = LemonIrc.Identities.serverKey(target);
+        identityVault.servers = [{name: target.name, host: target.host, port: Number(target.port), tls: Boolean(target.tls)}, ...identityVault.servers.filter(entry => LemonIrc.Identities.serverKey(entry) !== key)].slice(0, 50);
+        if (byId('irc-server-password').value)
+        {
+            identityVault.passwords['server ' + key] = byId('irc-server-password').value;
+        }
+        saveIdentities();
+        status.textContent = 'Server saved' + (byId('irc-server-password').value ? ' with its password' : '') + '. It is at the top of the server list.';
+    }
+
+    /**
+     * @brief opens the bridge connection to a server and logs in; also used by the automatic reconnect
+     *
+     * @param object target -> listed server, or {id, name, host, port, tls, is_custom} for a typed one
+     * @param object login -> {nickname, account, password, username, realname, serverPassword}
+     * @param boolean is_reconnect -> started by the automatic reconnect
+     *
+     * @return void
+     */
+    function openConnection(target, login, is_reconnect = false)
+    {
+        const errorText = byId('another-buttons-loading-container-p');
+        lastConnection = {target, login};
+
+        // close the previous connection
+        const old = socket;
+        socket = null;
+        old?.close();
+        client.connected = false;
+        client.listing = false;
+        client.pendingDirectory = null;
+        client.password = '';
+        client.conversation(current).draft = input.value;
+        for (const channel of client.channels.values())
+        {
+            channel.joined = false;
+            channel.members.clear();
+            channel.names = null;
+        }
+
+        // one client per server
+        if (activeNetwork && activeNetwork !== target.id)
+        {
+            sessions.set(activeNetwork, client);
+            client = sessions.get(target.id) || new LemonIrc.Client(sendLine, schedule);
+            window.ircClient = client;
+            current = 'network';
+            input.value = client.conversation(current).draft;
+        }
+        activeNetwork = target.id;
+        client.networkId = target.id;
+        client.onMessage = queueHistory;
+        client.ignoredNicks = loadIgnored(target.id);
+        renderIgnoredList();
+        networkCollapsed = false;
+        client.network = target.name;
+        client.capabilities = [];
+
+        // open the bridge connection
+        let connectionError = '';
+        let is_login_rejected = false;
+        const address = target.is_custom ? '&host=' + encodeURIComponent(target.host) + '&port=' + target.port + '&tls=' + Boolean(target.tls) : '&network=' + encodeURIComponent(target.id);
+        const next = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/irc?token=' + encodeURIComponent(accessToken()) + address, 'text.ircv3.net');
+        socket = next;
+        disconnectedByUser = false;
+        next.onopen = () =>
+        {
+            if (socket === next)
+            {
+                guard(() => client.register(login.nickname, login.account, login.password, login.username, login.realname, login.serverPassword));
+            }
+        };
+        next.onmessage = event =>
+        {
+            if (socket === next)
+            {
+                try
+                {
+                    receive(event.data);
+                }
+                catch (error)
+                {
+                    if (!client.connected)
+                    {
+                        connectionError = error.message;
+                        is_login_rejected = true;
+                        next.close();
+                    }
+                    report(error);
+                }
+            }
+        };
+        next.onerror = () =>
+        {
+            if (socket === next)
+            {
+                connectionError = 'The bridge connection failed. Check that it is running.';
+                if (!is_reconnect)
+                {
+                    report(new Error(connectionError));
+                }
+            }
+        };
+        next.onclose = event =>
+        {
+            if (socket === next)
+            {
+                const wasConnected = client.connected;
+
+                // channels to join again after a lost connection
+                const joined = [...client.channels.values()].filter(channel => channel.joined).map(channel => channel.name);
+                if (joined.length && !disconnectedByUser)
+                {
+                    reconnect.channels = joined;
+                }
+                client.connected = false;
+                client.listing = false;
+                client.pendingDirectory = null;
+                if (wasConnected || !is_reconnect)
+                {
+                    playEventSound(disconnectedByUser ? 'disconnected' : 'connection_lost');
+                }
+                client.password = '';
+                for (const channel of client.channels.values())
+                {
+                    channel.joined = false;
+                    channel.members.clear();
+                    channel.names = null;
+                    channel.membersUpdated = 0;
+                }
+                for (const dialog of document.querySelectorAll('dialog[open]'))
+                {
+                    dialog.close();
+                }
+                showConnectionState();
+                const reason = connectionError || event.reason || (disconnectedByUser ? 'Disconnected. Choose Connect to reconnect.' : 'Connection lost. Choose Connect to reconnect.');
+
+                // a failed reconnect attempt is noted in the log only
+                if (is_reconnect && !wasConnected)
+                {
+                    client.status(reason, 'error');
+                    errorText.textContent = reason;
+                }
+                else
+                {
+                    report(new Error(reason), true, false);
+                }
+
+                // try again unless the user ended it or the login was refused
+                if (!disconnectedByUser && !is_login_rejected && preferences.reconnect)
+                {
+                    scheduleReconnect(wasConnected ? 'Connection lost' : 'No connection');
+                }
+            }
+        };
+        showConnectionState();
+        errorText.textContent = (is_reconnect ? 'Reconnecting to ' : 'Connecting to ') + target.name + '…';
+        client.status(errorText.textContent);
+        schedule();
+    }
+
+    /**
+     * @brief waits before the next reconnect attempt and shows the remaining time
+     *
+     * @param string reason -> why the connection ended, shown before the countdown
+     *
+     * @return void
+     */
+    function scheduleReconnect(reason)
+    {
+        clearTimeout(reconnect.timer);
+        clearInterval(reconnect.tick);
+        const delay = reconnectDelays[Math.min(reconnect.attempt, reconnectDelays.length - 1)];
+        reconnect.attempt++;
+        reconnect.at = Date.now() + delay * 1000;
+
+        // remaining seconds
+        const show = () =>
+        {
+            const seconds = Math.max(0, Math.ceil((reconnect.at - Date.now()) / 1000));
+            byId('another-buttons-loading-container-p').textContent = reason + '. Reconnecting in ' + seconds + ' s…';
+        };
+        show();
+        reconnect.tick = setInterval(show, 1000);
+        reconnect.timer = setTimeout(reconnectNow, delay * 1000);
+        byId('irc-reconnect-actions').style.display = '';
+        client.status(reason + '. Reconnecting in ' + delay + ' s', 'connection');
+    }
+
+    /**
+     * @brief starts the waiting reconnect attempt at once
+     *
+     * @return void
+     */
+    function reconnectNow()
+    {
+        clearTimeout(reconnect.timer);
+        clearInterval(reconnect.tick);
+        reconnect.timer = 0;
+        byId('irc-reconnect-actions').style.display = 'none';
+        if (lastConnection)
+        {
+            openConnection(lastConnection.target, lastConnection.login, true);
+        }
+    }
+
+    /**
+     * @brief ends the automatic reconnect; the channels to join again are kept for a manual connect
+     *
+     * @return void
+     */
+    function stopReconnect()
+    {
+        clearTimeout(reconnect.timer);
+        clearInterval(reconnect.tick);
+        reconnect.timer = 0;
+        reconnect.attempt = 0;
+        byId('irc-reconnect-actions').style.display = 'none';
+    }
+
+    /**
+     * @brief joins the channels of the lost connection and, when turned on, of the last session
+     *
+     * @return void
+     */
+    function joinAfterConnect()
+    {
+        const names = [...reconnect.channels];
+        reconnect.channels = [];
+
+        // channels of the last session
+        if (preferences.join_last_channels && identityVault.is_unlocked && lastConnection)
+        {
+            const profile = LemonIrc.Identities.list(identityStorage, lastConnection.target).find(entry => entry.account.toLowerCase() === lastConnection.login.account.toLowerCase());
+            names.push(...(profile?.channels || []));
+        }
+        const unique = [...new Map(names.map(name => [client.fold(name), name])).values()].filter(name => !client.channels.get(client.fold(name))?.joined);
+        unique.forEach(name => rejoining.add(client.fold(name)));
+
+        // channels with a password, one line each
+        const plain = [];
+        for (const name of unique)
+        {
+            const key = channelKeys.get(client.fold(name));
+            if (key)
+            {
+                guard(() => client.write('JOIN ' + name + ' ' + key));
+            }
+            else
+            {
+                plain.push(name);
+            }
+        }
+
+        // the others in lines of up to 400 characters
+        let list = '';
+        for (const name of plain)
+        {
+            if (list && ('JOIN ' + list + ',' + name).length > 400)
+            {
+                const line = 'JOIN ' + list;
+                guard(() => client.write(line));
+                list = '';
+            }
+            list = list ? list + ',' + name : name;
+        }
+        if (list)
+        {
+            guard(() => client.write('JOIN ' + list));
+        }
+    }
+
+    /**
+     * @brief saves the joined channels of this identity a moment after they change
+     *
+     * @return void
+     */
+    function scheduleChannelSave()
+    {
+        clearTimeout(channelSaveTimer);
+        channelSaveTimer = setTimeout(() =>
+        {
+            if (!identityVault.is_unlocked || !lastConnection || !client.connected)
+            {
+                return;
+            }
+            const names = [...client.channels.values()].filter(channel => channel.joined).map(channel => channel.name);
+            LemonIrc.Identities.rememberChannels(identityStorage, lastConnection.target, lastConnection.login.account, names);
+        }, 2000);
+    }
+
     /**
      * @brief handles server replies and plays the matching sound
      *
@@ -1103,6 +1525,7 @@ document.addEventListener('DOMContentLoaded', () =>
     function receive(line)
     {
         client.eventLocation = eventLocation;
+        client.is_project_address_shared = preferences.project_address;
         const packet = LemonIrc.parse(line);
         const wasConnected = client.connected;
         const own = packet && client.fold(packet.nick) === client.fold(client.nick);
@@ -1112,6 +1535,12 @@ document.addEventListener('DOMContentLoaded', () =>
         if (!packet)
         {
             return;
+        }
+
+        // keep the joined channels for the next session
+        if (preferences.join_last_channels && ['JOIN', 'PART', 'KICK'].includes(packet.command))
+        {
+            scheduleChannelSave();
         }
         if (['PRIVMSG', 'NOTICE', 'TAGMSG'].includes(packet.command) && packet.prefix.includes('!') && client.isIgnored(packet.nick))
         {
@@ -1127,7 +1556,7 @@ document.addEventListener('DOMContentLoaded', () =>
         {
             playEventSound('error');
         }
-        if (!nicknameRetried && !lookupMissing && (/^[45]\d{2}$/.test(packet.command) || ['ERROR', 'FAIL', '696', '723'].includes(packet.command) || listRefused))
+        if (!nicknameRetried && !lookupMissing && !client.is_reply_tracked && (/^[45]\d{2}$/.test(packet.command) || ['ERROR', 'FAIL', '696', '723'].includes(packet.command) || listRefused))
         {
             report(new Error((['ERROR', 'FAIL'].includes(packet.command) ? packet.params : packet.params.slice(1)).join(' ')), false, packet.command !== '422' && !backgroundLookup);
             const channel = client.channels.get(client.fold(packet.params[1] || ''));
@@ -1146,6 +1575,10 @@ document.addEventListener('DOMContentLoaded', () =>
             showConnectionState();
             playEventSound('connected');
             client.requestDirectory();
+
+            // connected again: join the channels
+            stopReconnect();
+            joinAfterConnect();
             return;
         }
         if (!client.connected)
@@ -1162,14 +1595,22 @@ document.addEventListener('DOMContentLoaded', () =>
                 }
                 break;
             case 'JOIN':
+            {
+                // channels joined again after a reconnect keep the current conversation and stay silent
+                const is_rejoin = own && rejoining.delete(client.fold(packet.params[0] || ''));
+                if (is_rejoin)
+                {
+                    break;
+                }
                 playEventSound(own ? 'channel_switched' : 'user_entered_your_channel');
                 if (own)
                 {
                     const joined = client.channel(packet.params[0]);
-                    treeView.container.scrollTop = 0;
+                    channelToReveal = joined.id;
                     activate(joined.id);
                 }
                 break;
+            }
             case 'PART':
                 if (!own)
                 {
@@ -1190,7 +1631,7 @@ document.addEventListener('DOMContentLoaded', () =>
                 break;
         }
     }
-    function join(name, key = '')
+    function join(name, key = '', writeLine = line => client.write(line))
     {
         if (name && !client.channelTypes.includes(name[0]))
         {
@@ -1208,7 +1649,13 @@ document.addEventListener('DOMContentLoaded', () =>
         {
             throw new Error('Connect to a server first');
         }
-        client.write('JOIN ' + name + (key ? ' ' + key : ''));
+
+        // the password is reused when joining again after a reconnect
+        if (key)
+        {
+            channelKeys.set(client.fold(name), key);
+        }
+        writeLine('JOIN ' + name + (key ? ' ' + key : ''));
     }
     function openChannel(name)
     {
@@ -1223,47 +1670,69 @@ document.addEventListener('DOMContentLoaded', () =>
     }
     function runCommand(text)
     {
-        guard(() =>
+        guard(() => executeCommand(text));
+    }
+
+    /**
+     * @brief runs a slash command or sends a raw irc line
+     *
+     * @param string text -> command text from the message field or the command window
+     * @param function onReply -> receives the replies, or null when replies are not collected
+     *
+     * @return void
+     */
+    function executeCommand(text, onReply = null)
+    {
+        const writeLine = onReply ? line => client.writeTracked(line, onReply) : line => client.write(line);
+        if (!text)
         {
-            if (!text)
+            return;
+        }
+
+        // slash commands
+        if (text.startsWith('/'))
+        {
+            const [command, ...args] = text.slice(1).split(' ');
+            const rest = args.join(' ');
+            switch (command.toLowerCase())
             {
-                return;
-            }
-            if (text.startsWith('/'))
-            {
-                const [command, ...args] = text.slice(1).split(' ');
-                const rest = args.join(' ');
-                switch (command.toLowerCase())
+                case 'join': join(rest, '', writeLine); break;
+                case 'list': client.requestDirectory(); break;
+                case 'part': writeLine('PART ' + (args[0] || client.conversation(current).name)); break;
+                case 'nick': writeLine('NICK ' + rest); break;
+                case 'whois': writeLine('WHOIS ' + rest); break;
+                case 'me': client.say(current, rest, true); break;
+                case 'msg':
                 {
-                    case 'join': join(rest); break;
-                    case 'list': client.requestDirectory(); break;
-                    case 'part': client.write('PART ' + (args[0] || client.conversation(current).name)); break;
-                    case 'nick': client.write('NICK ' + rest); break;
-                    case 'whois': client.write('WHOIS ' + rest); break;
-                    case 'me': client.say(current, rest, true); break;
-                    case 'msg':
+                    if (!args[0] || !args.slice(1).join(' '))
                     {
-                        if (!args[0] || !args.slice(1).join(' '))
-                        {
-                            throw new Error('Use /msg nickname message');
-                        }
-                        const conversation = client.private(client.user(args[0]));
-                        client.say(conversation.id, args.slice(1).join(' '));
-                        activate(conversation.id);
+                        throw new Error('Use /msg nickname message');
+                    }
+
+                    // send from the command window
+                    if (onReply)
+                    {
+                        writeLine('PRIVMSG ' + args[0] + ' :' + args.slice(1).join(' '));
                         break;
                     }
-                    case 'query': activate(client.private(client.user(rest)).id); break;
-                    case 'quote': client.write(rest); break;
-                    case 'quit': client.write('QUIT :Leaving'); break;
-                    default: throw new Error('Commands: /join /list /part /nick /msg /query /whois /me /quote /quit');
+                    const conversation = client.private(client.user(args[0]));
+                    client.say(conversation.id, args.slice(1).join(' '));
+                    activate(conversation.id);
+                    break;
                 }
+                case 'query': activate(client.private(client.user(rest)).id); break;
+                case 'quote': writeLine(rest); break;
+                case 'quit': client.write('QUIT :Leaving'); break;
+                default: throw new Error('Commands: /join /list /part /nick /msg /query /whois /me /quote /quit');
             }
-            else
-            {
-                client.write(text);
-            }
-            schedule();
-        });
+        }
+
+        // raw line
+        else
+        {
+            writeLine(text);
+        }
+        schedule();
     }
     function send()
     {
@@ -1274,7 +1743,16 @@ document.addEventListener('DOMContentLoaded', () =>
             {
                 return;
             }
-            client.say(current, text);
+
+            // run a command
+            if (text.startsWith('/') && !text.startsWith('//'))
+            {
+                executeCommand(text);
+                input.value = '';
+                client.conversation(current).draft = '';
+                return;
+            }
+            client.say(current, text.startsWith('//') ? text.slice(1) : text);
             playEventSound('message_sent');
             input.value = '';
             client.conversation(current).draft = '';
@@ -1495,24 +1973,910 @@ document.addEventListener('DOMContentLoaded', () =>
             find.click();
         }
     }
+    /**
+     * @brief opens a window that sends irc commands and shows only their replies
+     *
+     * @return void
+     */
     function commandPrompt()
     {
         const panel = dialog('IRC command window');
         panel.id = 'irc-command-window';
+        const owner = client;
         const field = document.createElement('input');
         field.className = 'text-input-pretty';
         field.ariaLabel = 'IRC command';
+        field.placeholder = 'For example: WHO #channel or /msg NickServ INFO';
+        field.maxLength = 510;
         const output = make('pre', '', 'irc-command-output');
-        const update = () => output.textContent = client.conversation('network').messages.slice(-30).map(message => message.text).join('\n');
-        panel.append(make('p', 'Advanced commands. Normal messages belong in the chat box.'), output, field, button('Run', () =>
+        output.setAttribute('aria-live', 'polite');
+        const run = () =>
         {
-            runCommand(field.value.trim());
-            update();
-        }));
-        const timer = setInterval(update, 1000);
-        panel.addEventListener('close', () => clearInterval(timer));
-        update();
+            const text = field.value.trim();
+            if (!text)
+            {
+                return;
+            }
+
+            // one block per command
+            const block = make('div', '> ' + text + '\n', 'irc-command-block');
+            output.append(block);
+            if (output.children.length > 100)
+            {
+                output.firstElementChild.remove();
+            }
+            const show = line =>
+            {
+                block.append(line + '\n');
+                output.scrollTop = output.scrollHeight;
+            };
+            output.scrollTop = output.scrollHeight;
+            try
+            {
+                // check the connection
+                if (owner !== client || !owner.connected)
+                {
+                    throw new Error('Connect to a server first.');
+                }
+
+                // send the command
+                let is_answered = false;
+                executeCommand(text, reply =>
+                {
+                    if (!panel.isConnected)
+                    {
+                        return;
+                    }
+                    if (!reply.is_finished)
+                    {
+                        is_answered = true;
+                        show('  ' + reply.text);
+                    }
+                    else if (!is_answered && !reply.service)
+                    {
+                        show('  (the server sent no reply)');
+                    }
+                });
+                field.value = '';
+            }
+            catch (error)
+            {
+                show('  ' + error.message);
+                playEventSound('error');
+            }
+        };
+        field.onkeydown = event =>
+        {
+            if (event.key === 'Enter')
+            {
+                event.preventDefault();
+                run();
+            }
+        };
+        panel.append(make('p', 'Send IRC commands that have no button, for example WHO, MODE, or messages to NickServ and ChanServ. This window shows only the replies to these commands.'), output, field, button('Run', run));
         field.focus();
+    }
+
+    /**
+     * @brief opens the window that registers, confirms and logs in to a nickname account
+     *
+     * @return void
+     */
+    function accountWindow()
+    {
+        // registering needs a connection
+        if (!client.connected)
+        {
+            identityManager();
+            return;
+        }
+        const owner = client;
+        const network = networkList?.find(entry => entry.id === activeNetwork);
+        let lastSecret = null;
+        let pending = null;
+        const registration = owner.accountRegistration();
+        const panel = dialog('Nickname account');
+        panel.id = 'irc-account-window';
+        let serviceReplies = '';
+        let timer = 0;
+        panel.addEventListener('close', () => clearTimeout(timer));
+
+        // form fields
+        const field = (label, type, value = '', autocomplete = 'off') =>
+        {
+            const control = document.createElement('input');
+            control.type = type;
+            control.className = 'text-input-pretty';
+            control.value = value;
+            control.autocomplete = autocomplete;
+            control.maxLength = 300;
+            const caption = make('label', label);
+            caption.append(control);
+            return [caption, control];
+        };
+        const [accountLabel, account] = field('Account name', 'text', owner.nick, 'username');
+        account.readOnly = !registration.is_custom_account_name;
+        const [passwordLabel, password] = field('Password', 'password', '', 'new-password');
+        const [repeatLabel, repeat] = field('Repeat the password', 'password', '', 'new-password');
+        const [emailLabel, email] = field(registration.is_available ? (registration.is_email_required ? 'E-mail address' : 'E-mail address (optional)') : 'E-mail address (most networks need one)', 'email', '', 'email');
+        const [codeLabel, code] = field('Code from the e-mail', 'text');
+        const [loginAccountLabel, loginAccount] = field('Account name', 'text', owner.nick, 'username');
+        const [loginPasswordLabel, loginPassword] = field('Password', 'password', '', 'current-password');
+        const result = make('p', '', 'irc-account-result');
+        result.role = 'status';
+        const details = make('pre', '', 'irc-command-output');
+
+        // reply handling
+        const send = (line, secret = null) =>
+        {
+            let best = null;
+            let is_answered = false;
+            try
+            {
+                if (owner !== client || !owner.connected)
+                {
+                    throw new Error('Connect to a server first.');
+                }
+                owner.writeTracked(line, reply =>
+                {
+                    if (!panel.isConnected)
+                    {
+                        return;
+                    }
+
+                    // no reply
+                    if (reply.is_finished)
+                    {
+                        if (!is_answered && !reply.service)
+                        {
+                            result.textContent = 'The network sent no reply.';
+                        }
+                        return;
+                    }
+
+                    // show the reply
+                    is_answered = true;
+                    clearTimeout(timer);
+                    const {command, params, nick} = reply.packet;
+                    const text = ['PRIVMSG', 'NOTICE'].includes(command) ? params[1] || '' : params.at(-1) || '';
+                    if (/serv$/i.test(nick))
+                    {
+                        serviceReplies += ' ' + text;
+                    }
+                    details.textContent += reply.text + '\n';
+                    details.hidden = false;
+
+                    // plain result
+                    const found = LemonIrc.Accounts.describe(command, params, text);
+                    if (!found || (best?.result === 'confirm' && ['registered', 'logged-in'].includes(found.result)))
+                    {
+                        return;
+                    }
+                    best = found;
+                    result.textContent = found.message;
+                    if (['registered', 'logged-in', 'verified', 'confirm'].includes(found.result))
+                    {
+                        saveAccount(secret?.account || account.value.trim(), secret?.password || '');
+                    }
+                    if (found.result === 'confirm')
+                    {
+                        showPart(1);
+                    }
+                    if (['failed', 'exists', 'email', 'password', 'wait', 'limit', 'wrong-code', 'wrong-password', 'not-registered', 'no-service', 'unknown-command'].includes(found.result))
+                    {
+                        playEventSound('error');
+                    }
+                }, 15000);
+
+                // wait for the service
+                details.textContent = '';
+                details.hidden = true;
+                result.textContent = 'Waiting for the reply of the network…';
+                clearTimeout(timer);
+                if (line.startsWith('PRIVMSG NickServ '))
+                {
+                    timer = setTimeout(() =>
+                    {
+                        if (!is_answered)
+                        {
+                            result.textContent = 'NickServ did not reply. This network may have no NickServ service.';
+                        }
+                    }, 15000);
+                }
+                password.value = '';
+                repeat.value = '';
+                loginPassword.value = '';
+            }
+            catch (error)
+            {
+                result.textContent = error.message;
+                playEventSound('error');
+            }
+        };
+
+        // saved account
+        const saveAccount = (name, secretPassword) =>
+        {
+            if (!network || !name)
+            {
+                return;
+            }
+
+            // locked identities
+            if (!identityVault.is_unlocked)
+            {
+                pending = {name, password: secretPassword};
+                note.textContent = 'To keep this account for later connections, choose "' + (identityVault.is_existing ? 'Unlock saved identities…' : 'Create saved identities…') + '" in the list at the top.';
+                return;
+            }
+            // username and real name of this connection
+            const previous = LemonIrc.Identities.list(identityStorage, network).find(profile => profile.selected);
+            LemonIrc.Identities.remember(identityStorage, network, owner.nick, name);
+            LemonIrc.Identities.rememberUser(identityStorage, network, name, utils__storage_get('preferred_username') || previous?.username || '', utils__storage_get('preferred_realname') || previous?.realname || '');
+            const is_password_saved = savePasswordBox.checked && Boolean(secretPassword);
+            if (is_password_saved)
+            {
+                identityVault.passwords[LemonIrc.Identities.passwordKey(network, name)] = secretPassword;
+                saveIdentities();
+            }
+            pending = null;
+            fillChoices();
+            note.textContent = 'The identity "' + name + '" is saved' + (is_password_saved ? ' with its password' : '') + '. In the connect window, choose it to log in when connecting.';
+        };
+        const note = make('p', '', 'irc-account-note');
+
+        // saved identities of this server
+        const identityChoice = document.createElement('select');
+        identityChoice.className = 'text-input-pretty';
+        identityChoice.ariaLabel = 'Saved identity';
+        const identityLabel = make('label', 'Identity');
+        identityLabel.append(identityChoice);
+        const savePasswordBox = document.createElement('input');
+        savePasswordBox.type = 'checkbox';
+        savePasswordBox.checked = true;
+        const savePasswordLabel = make('label', '', 'irc-identity-check');
+        savePasswordLabel.append(savePasswordBox, document.createTextNode(' save the password with this identity'));
+        const fillChoices = () =>
+        {
+            const profiles = network && identityVault.is_unlocked ? LemonIrc.Identities.list(identityStorage, network).filter(profile => profile.account) : [];
+            identityChoice.replaceChildren(new Option('Create a new identity', '*new*'));
+            for (const profile of profiles)
+            {
+                identityChoice.append(new Option(profile.nick + ' · ' + profile.account, profile.account));
+            }
+            if (!identityVault.is_unlocked)
+            {
+                identityChoice.append(new Option(identityVault.is_existing ? 'Unlock saved identities…' : 'Create saved identities…', '*unlock*'));
+            }
+            savePasswordBox.disabled = !identityVault.is_unlocked;
+            savePasswordLabel.title = identityVault.is_unlocked ? 'Stored encrypted with your master password' : 'Unlock or create saved identities first';
+            return profiles;
+        };
+        identityChoice.onchange = () =>
+        {
+            // unlock first
+            if (identityChoice.value === '*unlock*')
+            {
+                identityChoice.value = '*new*';
+                unlockIdentities(() =>
+                {
+                    fillChoices();
+                    if (pending)
+                    {
+                        saveAccount(pending.name, pending.password);
+                    }
+                });
+                return;
+            }
+            if (identityChoice.value === '*new*')
+            {
+                showPart(0);
+                return;
+            }
+
+            // log in with a saved identity
+            loginAccount.value = identityChoice.value;
+            loginPassword.value = identityVault.passwords[LemonIrc.Identities.passwordKey(network, identityChoice.value)] || '';
+            showPart(2);
+        };
+
+        // the three parts
+        const type = () => LemonIrc.Accounts.serviceType(registration, owner.serverVersion, serviceReplies);
+        const registerPart = make('div', '', 'irc-account-part');
+        registerPart.append(make('p', account.readOnly ? 'The account name is your current nickname. To register another name, change your nickname first.' : 'Choose the account name, a password and your e-mail address.'), accountLabel, passwordLabel, repeatLabel, emailLabel, button('Register', () =>
+        {
+            try
+            {
+                lastSecret = {account: account.value.trim(), password: password.value};
+                send(LemonIrc.Accounts.registerLine(type(), {account: account.value.trim(), password: password.value, repeat: repeat.value, email: email.value.trim()}, registration), lastSecret);
+            }
+            catch (error)
+            {
+                result.textContent = error.message;
+                playEventSound('error');
+            }
+        }));
+        const confirmPart = make('div', '', 'irc-account-part');
+        confirmPart.append(make('p', 'Some networks send an e-mail with a code after registration. Enter the code, or paste the whole line from the e-mail.'), codeLabel, button('Confirm', () =>
+        {
+            try
+            {
+                send(LemonIrc.Accounts.confirmLine(type(), account.value.trim(), code.value), lastSecret);
+            }
+            catch (error)
+            {
+                result.textContent = error.message;
+                playEventSound('error');
+            }
+        }));
+        const loginPart = make('div', '', 'irc-account-part');
+        loginPart.append(make('p', 'Log in to a nickname you registered before. To log in when connecting, use "Log in with a registered account" in the connect window.'), loginAccountLabel, loginPasswordLabel, button('Log in', () =>
+        {
+            try
+            {
+                send(LemonIrc.Accounts.loginLine(loginAccount.value.trim(), loginPassword.value), {account: loginAccount.value.trim(), password: loginPassword.value});
+            }
+            catch (error)
+            {
+                result.textContent = error.message;
+                playEventSound('error');
+            }
+        }));
+
+        // part buttons
+        const parts = [registerPart, confirmPart, loginPart];
+        const choices = make('div', '', 'irc-account-choices');
+        const showPart = index =>
+        {
+            parts.forEach((part, position) => part.hidden = position !== index);
+            [...choices.children].forEach((choice, position) => choice.setAttribute('aria-pressed', String(position === index)));
+        };
+        ['Register', 'Confirm code', 'Log in'].forEach((name, index) => choices.append(button(name, () => showPart(index))));
+        details.hidden = true;
+        panel.append(identityLabel, choices, ...parts, savePasswordLabel, result, details, note, button('Manage saved identities', () =>
+        {
+            panel.close();
+            identityManager();
+        }));
+
+        // saved identity first
+        const saved = fillChoices();
+        const chosen = saved.find(profile => profile.selected) || saved[0];
+        identityChoice.value = chosen ? chosen.account : '*new*';
+        if (chosen)
+        {
+            identityChoice.onchange();
+            loginPassword.focus();
+            return;
+        }
+        showPart(0);
+        (account.readOnly ? password : account).focus();
+    }
+
+    /**
+     * @brief queues a new conversation message for conversations.sqlite when saving is on
+     *
+     * @param object conversation -> conversation of the message
+     * @param object message -> message as stored in the conversation
+     * @param object owner -> client that received the message
+     *
+     * @return void
+     */
+    function queueHistory(conversation, message, owner)
+    {
+        if (!preferences.save_history)
+        {
+            return;
+        }
+
+        // leave out passwords
+        if (message.own && /serv$/i.test(conversation.name) && /^\s*(identify|register|verify|confirm|ghost|recover|regain|release|set\s+pass)/i.test(message.text))
+        {
+            return;
+        }
+        historyQueue.push({network: owner.networkId || owner.network, conversation: historyKey(owner, conversation), name: conversation.name, author: message.author, text: message.text, time: message.time, kind: message.kind, is_own: Boolean(message.own && message.author), is_action: message.action});
+
+        // send once a second
+        if (!historyTimer)
+        {
+            historyTimer = setTimeout(sendHistory, 1000);
+        }
+    }
+
+    /**
+     * @brief names a conversation in conversations.sqlite the same way after every page load
+     *
+     * @param object owner -> client of the conversation
+     * @param object conversation -> channel, private or network conversation
+     *
+     * @return string channel:#name, user:nickname in lower case, or network
+     */
+    function historyKey(owner, conversation)
+    {
+        return conversation.user ? 'user:' + owner.fold(conversation.user.nick) : conversation.id;
+    }
+
+    /**
+     * @brief sends the queued messages to the bridge, which writes them to conversations.sqlite
+     *
+     * @return void
+     */
+    function sendHistory()
+    {
+        historyTimer = 0;
+        const batch = historyQueue.splice(0, 500);
+        if (!batch.length)
+        {
+            return;
+        }
+
+        // send the batch
+        fetch('/history?token=' + encodeURIComponent(accessToken()), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(batch)}).then(async response =>
+        {
+            if (!response.ok)
+            {
+                throw new Error((await response.json().catch(() => ({}))).error || 'the bridge answered ' + response.status);
+            }
+            is_history_failure_shown = false;
+        }).catch(error =>
+        {
+            // report a failure once
+            if (!is_history_failure_shown)
+            {
+                is_history_failure_shown = true;
+                client.status('Saving conversations failed: ' + error.message, 'error');
+                schedule();
+            }
+        });
+
+        // send the rest later
+        if (historyQueue.length)
+        {
+            historyTimer = setTimeout(sendHistory, 1000);
+        }
+    }
+
+    /**
+     * @brief shows the saved messages of a conversation above its messages, once per conversation
+     *
+     * @param object owner -> client of the conversation
+     * @param string id -> conversation identifier
+     *
+     * @return void
+     */
+    function loadHistory(owner, id)
+    {
+        const conversation = owner.conversations.get(id);
+        if (!preferences.show_history || !historyLines || !conversation || conversation.is_history_loaded || id === 'network')
+        {
+            return;
+        }
+        conversation.is_history_loaded = true;
+
+        // ask for older messages only
+        const before = conversation.messages[0]?.time || new Date().toISOString();
+        const address = '/history?token=' + encodeURIComponent(accessToken()) + '&network=' + encodeURIComponent(owner.networkId || owner.network) + '&conversation=' + encodeURIComponent(historyKey(owner, conversation)) + '&limit=' + historyLines + '&before=' + encodeURIComponent(before);
+        fetch(address).then(response => response.ok ? response.json() : []).then(rows =>
+        {
+            if (!Array.isArray(rows) || !rows.length)
+            {
+                return;
+            }
+
+            // put them above
+            const saved = rows.map(row => ({author: row.author, text: row.text, time: row.time, own: Boolean(row.is_own), action: Boolean(row.is_action), kind: row.kind, is_saved: true}));
+            saved.push({author: '', text: 'Messages above are saved from earlier connections', time: new Date().toISOString(), own: false, action: false, kind: 'info', is_saved: true});
+            conversation.messages.unshift(...saved);
+            if (conversation.messages.length > 500)
+            {
+                conversation.messages.splice(0, conversation.messages.length - 500);
+            }
+            schedule();
+        }).catch(() =>
+        {
+            conversation.is_history_loaded = false;
+        });
+    }
+
+    /**
+     * @brief asks the bridge whether identities.lemon exists and keeps its encrypted content
+     *
+     * @return Promise<void> file state read, or left as missing on a failure
+     */
+    async function readIdentityFile()
+    {
+        try
+        {
+            const answer = await fetch('/identities?token=' + encodeURIComponent(accessToken())).then(response => response.json());
+            identityVault.is_existing = Boolean(answer.is_existing);
+            identityVault.file = answer.file || null;
+        }
+        catch (error)
+        {
+            identityVault.is_existing = false;
+        }
+    }
+
+    /**
+     * @brief encrypts the unlocked identities and sends them to the bridge, one save after the other
+     *
+     * @return void
+     */
+    function saveIdentities()
+    {
+        if (!identityVault.is_unlocked)
+        {
+            return;
+        }
+        identityVault.saving = identityVault.saving.then(async () =>
+        {
+            // encrypt the identities
+            const file = await LemonIrc.Identities.sealVault(identityVault.key, identityVault.salt, {profiles: JSON.parse(identityVault.profiles), passwords: identityVault.passwords, servers: identityVault.servers});
+
+            // send the file
+            const response = await fetch('/identities?token=' + encodeURIComponent(accessToken()), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(file)});
+            if (!response.ok)
+            {
+                throw new Error((await response.json().catch(() => ({}))).error || 'the bridge answered ' + response.status);
+            }
+            identityVault.file = file;
+            identityVault.is_existing = true;
+        }).catch(error => report(new Error('Saving identities failed: ' + error.message)));
+    }
+
+    /**
+     * @brief builds the master password form that creates or unlocks identities.lemon
+     *
+     * @param function onDone -> runs after the identities are unlocked
+     *
+     * @return HTMLElement form to add to a window
+     */
+    function unlockForm(onDone)
+    {
+        const form = make('div', '', 'irc-unlock-form');
+        const is_new = !identityVault.is_existing;
+        const field = label =>
+        {
+            const control = document.createElement('input');
+            control.type = 'password';
+            control.className = 'text-input-pretty';
+            control.autocomplete = is_new ? 'new-password' : 'current-password';
+            const caption = make('label', label);
+            caption.append(control);
+            return [caption, control];
+        };
+        const [passwordLabel, password] = field(is_new ? 'New master password' : 'Master password');
+        const [repeatLabel, repeat] = field('Repeat the master password');
+        const status = make('p', '', 'irc-account-result');
+        status.role = 'status';
+        const submit = async () =>
+        {
+            status.textContent = is_new ? 'Creating…' : 'Unlocking…';
+            try
+            {
+                // create or open the file
+                if (is_new && password.value !== repeat.value)
+                {
+                    throw new Error('The two master passwords are different.');
+                }
+                const opened = is_new ? {...await LemonIrc.Identities.createVault(password.value), content: {profiles: [], passwords: {}, servers: []}} : await LemonIrc.Identities.openVault(password.value, identityVault.file);
+                Object.assign(identityVault, {is_unlocked: true, key: opened.key, salt: opened.salt, profiles: JSON.stringify(opened.content.profiles), passwords: opened.content.passwords, servers: opened.content.servers});
+                password.value = '';
+                repeat.value = '';
+
+                // move the old names from local storage
+                const old = utils__storage_get('identities');
+                if (old)
+                {
+                    const profiles = JSON.parse(identityVault.profiles);
+                    for (const profile of JSON.parse(old))
+                    {
+                        if (profile && !profiles.some(entry => entry.network === profile.network && entry.account === profile.account))
+                        {
+                            profiles.push(profile);
+                        }
+                    }
+                    identityVault.profiles = JSON.stringify(profiles);
+                    try
+                    {
+                        localStorage.removeItem('irc_identities');
+                    }
+                    catch (error)
+                    {
+                        // storage may be blocked
+                    }
+                }
+                saveIdentities();
+                onDone();
+            }
+            catch (error)
+            {
+                status.textContent = error.message;
+                playEventSound('error');
+            }
+        };
+        for (const control of [password, repeat])
+        {
+            control.onkeydown = event =>
+            {
+                if (event.key === 'Enter')
+                {
+                    event.preventDefault();
+                    submit();
+                }
+            };
+        }
+        form.append(make('p', is_new ? 'Saved identities keep server, nickname, account, username, real name and, if you choose, passwords. They are encrypted with this master password and stored in identities.lemon in the folder the program was started from. A forgotten master password cannot be recovered.' : 'Enter the master password to use your saved identities.', 'irc-account-note'), passwordLabel);
+        if (is_new)
+        {
+            form.append(repeatLabel);
+        }
+        form.append(button(is_new ? 'Create' : 'Unlock', submit), status);
+        setTimeout(() => password.focus());
+        return form;
+    }
+
+    /**
+     * @brief opens a small window with the master password form
+     *
+     * @param function onDone -> runs after the identities are unlocked
+     *
+     * @return void
+     */
+    function unlockIdentities(onDone)
+    {
+        identityFileReady.then(() =>
+        {
+            const panel = dialog(identityVault.is_existing ? 'Unlock saved identities' : 'Create saved identities');
+            panel.id = 'irc-unlock-window';
+            panel.append(unlockForm(() =>
+            {
+                panel.close();
+                onDone();
+            }));
+        });
+    }
+
+    /**
+     * @brief finds the server list entry of a saved identity
+     *
+     * @param string serverKey -> host:port:tls from the identity
+     *
+     * @return object|null server list entry
+     */
+    function networkForKey(serverKey)
+    {
+        return (networkList || []).find(entry => LemonIrc.Identities.serverKey(entry) === serverKey) || null;
+    }
+
+    /**
+     * @brief opens the window that lists, adds, changes and deletes saved identities
+     *
+     * @return void
+     */
+    async function identityManager()
+    {
+        await identityFileReady;
+        await loadNetworks().catch(() => {});
+        const panel = dialog('Saved identities');
+        panel.id = 'irc-identity-manager';
+
+        // connection state
+        const is_connecting = Boolean(socket) && socket.readyState <= WebSocket.OPEN && !client.connected;
+        const state = make('p', client.connected ? 'Connected to ' + client.network + '. Register or log in to a nickname there with "Register or log in" below.' : (is_connecting ? 'Connecting… Registering a nickname is possible when the connection is complete.' : 'Not connected. Registering a nickname needs a connection to a server.'), 'irc-account-note');
+        panel.append(state);
+        const actions = make('div', '', 'irc-account-choices');
+        if (client.connected)
+        {
+            actions.append(button('Register or log in', () =>
+            {
+                panel.close();
+                accountWindow();
+            }));
+        }
+        else if (!is_connecting)
+        {
+            actions.append(button('Connect', () =>
+            {
+                panel.close();
+                connect();
+            }));
+        }
+        panel.append(actions);
+
+        // locked identities
+        const body = make('div', '', 'irc-identity-body');
+        panel.append(body);
+        const show = () =>
+        {
+            body.replaceChildren();
+            if (!identityVault.is_unlocked)
+            {
+                body.append(unlockForm(show));
+                return;
+            }
+
+            // identity rows
+            const profiles = JSON.parse(identityVault.profiles);
+            const rows = make('div', '', 'irc-identity-list');
+            if (!profiles.length)
+            {
+                rows.append(make('p', 'No saved identities yet.', 'irc-account-note'));
+            }
+            for (const profile of profiles)
+            {
+                const network = networkForKey(profile.network);
+                const row = make('div', '', 'irc-identity-row');
+                const is_password_saved = Boolean(identityVault.passwords[profile.network + ' ' + profile.account.toLowerCase()]);
+                const text = make('div', '', 'irc-identity-text');
+                text.append(make('span', profile.nick + (profile.account ? ' · account ' + profile.account : ' · guest'), 'irc-identity-name'), make('span', (network?.name || profile.network) + (profile.username ? ' · username ' + profile.username : '') + (is_password_saved ? ' · password saved' : ''), 'irc-identity-details'));
+                row.append(text, button('Use', () =>
+                {
+                    panel.close();
+                    useIdentity(profile);
+                }), button('Edit', () => editIdentity(profile, show)), button('Delete', () =>
+                {
+                    if (confirm('Delete the saved identity ' + profile.nick + (profile.account ? ' (' + profile.account + ')' : '') + '? This cannot be undone.'))
+                    {
+                        deleteIdentity(profile);
+                        show();
+                    }
+                }));
+                rows.append(row);
+            }
+            body.append(rows, button('Add identity', () => editIdentity(null, show)), button('Lock', () =>
+            {
+                Object.assign(identityVault, {is_unlocked: false, key: null, salt: null, profiles: '[]', passwords: {}, servers: []});
+                show();
+            }));
+        };
+        show();
+    }
+
+    /**
+     * @brief removes a saved identity and its saved password
+     *
+     * @param object profile -> saved identity
+     *
+     * @return void
+     */
+    function deleteIdentity(profile)
+    {
+        delete identityVault.passwords[profile.network + ' ' + profile.account.toLowerCase()];
+        identityStorage.write(JSON.stringify(JSON.parse(identityVault.profiles).filter(entry => entry.network !== profile.network || entry.account !== profile.account)));
+    }
+
+    /**
+     * @brief opens the connect window with a saved identity chosen
+     *
+     * @param object profile -> saved identity
+     *
+     * @return void
+     */
+    async function useIdentity(profile)
+    {
+        const network = networkForKey(profile.network);
+        if (network)
+        {
+            selectedNetwork = network.id;
+        }
+
+        // an own saved server
+        selectedServer = network ? null : identityVault.servers.find(server => LemonIrc.Identities.serverKey(server) === profile.network) || null;
+        await connect();
+        identitySelector.value = profile.account;
+        identitySelector.onchange();
+        if (!profile.account)
+        {
+            byId('irc-nickname').value = profile.nick;
+        }
+    }
+
+    /**
+     * @brief opens the form that adds or changes a saved identity
+     *
+     * @param object|null profile -> saved identity, or null for a new one
+     * @param function onSaved -> runs after saving
+     *
+     * @return void
+     */
+    function editIdentity(profile, onSaved)
+    {
+        const panel = dialog(profile ? 'Edit identity' : 'Add identity');
+        panel.id = 'irc-identity-editor';
+        const field = (label, value = '', type = 'text', maxLength = 100) =>
+        {
+            const control = document.createElement('input');
+            control.type = type;
+            control.className = 'text-input-pretty';
+            control.value = value;
+            control.maxLength = maxLength;
+            const caption = make('label', label);
+            caption.append(control);
+            return [caption, control];
+        };
+
+        // server choice
+        const server = document.createElement('select');
+        server.className = 'text-input-pretty';
+        for (const entry of networkList || [])
+        {
+            server.append(new Option(entry.name + ' (' + entry.host + ')', LemonIrc.Identities.serverKey(entry)));
+        }
+        for (const saved of identityVault.servers)
+        {
+            server.append(new Option(saved.name + ' (' + saved.host + ', saved server)', LemonIrc.Identities.serverKey(saved)));
+        }
+        if (profile && !networkForKey(profile.network) && ![...server.options].some(option => option.value === profile.network))
+        {
+            server.append(new Option(profile.network, profile.network));
+        }
+        const currentNetwork = networkList?.find(entry => entry.id === (activeNetwork || selectedNetwork)) || networkList?.[0];
+        server.value = profile?.network || (currentNetwork ? LemonIrc.Identities.serverKey(currentNetwork) : '');
+        const serverLabel = make('label', 'Server');
+        serverLabel.append(server);
+        const savedKey = profile ? profile.network + ' ' + profile.account.toLowerCase() : '';
+        const [nickLabel, nick] = field('Nickname', profile?.nick || '', 'text', 30);
+        const [accountLabel, account] = field('Account name (empty for a guest identity)', profile?.account || '');
+        const [passwordLabel, password] = field('Password', '', 'password', 300);
+        password.placeholder = identityVault.passwords[savedKey] ? 'saved; leave empty to keep it' : 'not saved';
+        const [usernameLabel, username] = field('Username', profile?.username || '', 'text', 10);
+        const [realnameLabel, realname] = field('Real name', profile?.realname || '', 'text', 50);
+        const keepLabel = make('label', '', 'irc-identity-check');
+        const keep = document.createElement('input');
+        keep.type = 'checkbox';
+        keep.checked = Boolean(identityVault.passwords[savedKey]);
+        keepLabel.append(keep, document.createTextNode(' save the password'));
+        password.oninput = () => keep.checked = keep.checked || Boolean(password.value);
+        const status = make('p', '', 'irc-account-result');
+        status.role = 'status';
+        panel.append(serverLabel, nickLabel, accountLabel, passwordLabel, keepLabel, usernameLabel, realnameLabel, button('Save', () =>
+        {
+            try
+            {
+                // check the fields
+                if (!/^[A-Za-z_\[\]\\`^{}|][A-Za-z0-9_\[\]\\`^{}|\-]{0,29}$/.test(nick.value.trim()))
+                {
+                    throw new Error('Choose a nickname with letters and numbers, without spaces.');
+                }
+                if (/\s/.test(account.value.trim()) || (username.value.trim() && !/^[A-Za-z0-9_.\-]{1,10}$/.test(username.value.trim())))
+                {
+                    throw new Error('The account name and username cannot contain spaces; the username has at most 10 letters, digits, _ - or .');
+                }
+                if (!server.value)
+                {
+                    throw new Error('Choose a server.');
+                }
+
+                // replace the old entry
+                const oldPassword = identityVault.passwords[savedKey];
+                if (profile)
+                {
+                    deleteIdentity(profile);
+                }
+                const separator = server.value.lastIndexOf(':');
+                const portSeparator = server.value.lastIndexOf(':', separator - 1);
+                const target = {host: server.value.slice(0, portSeparator), port: Number(server.value.slice(portSeparator + 1, separator)), tls: server.value.slice(separator + 1) === 'true'};
+                LemonIrc.Identities.remember(identityStorage, target, nick.value.trim(), account.value.trim());
+                LemonIrc.Identities.rememberUser(identityStorage, target, account.value.trim(), username.value.trim(), realname.value.trim());
+
+                // saved password
+                const newKey = LemonIrc.Identities.passwordKey(target, account.value.trim());
+                if (keep.checked && account.value.trim() && (password.value || oldPassword))
+                {
+                    identityVault.passwords[newKey] = password.value || oldPassword;
+                }
+                saveIdentities();
+                panel.close();
+                onSaved();
+            }
+            catch (error)
+            {
+                status.textContent = error.message;
+                playEventSound('error');
+            }
+        }), status);
+        nick.focus();
     }
 
     /**
@@ -2346,6 +3710,13 @@ document.addEventListener('DOMContentLoaded', () =>
             }
         }
         treeView.setEntries(entries);
+
+        // show a channel just joined
+        if (channelToReveal)
+        {
+            treeView.reveal(channelToReveal);
+            channelToReveal = '';
+        }
         filterCount.textContent = matches === 0 ? 'No matching channels' : matches + (matches === 1 ? ' channel' : ' channels');
     }
     /**
@@ -2407,7 +3778,8 @@ document.addEventListener('DOMContentLoaded', () =>
             country_iso_code: preferences.flags ? country : '',
             is_idle: false,
             is_ignored_by_local_client: member.user.ignored,
-            audio_state: 4,
+            // the themes' microphone-enabled circle; IRC has no voice, so nobody is shown as talking
+            audio_state: 2,
             unread_count: client.conversations.get('user:' + member.user.id)?.unread || 0
         }, false);
         const row = template.content.firstElementChild;
@@ -2597,6 +3969,7 @@ document.addEventListener('DOMContentLoaded', () =>
             }
             const row = make('div', '', message.author ? 'single-chat-message' : 'single-server-message');
             row.classList.toggle('irc-own-message', Boolean(message.own));
+            row.classList.toggle('irc-saved-message', Boolean(message.is_saved));
             if (message.author)
             {
                 const content = make('div', '', 'single-message-content');
@@ -2611,7 +3984,7 @@ document.addEventListener('DOMContentLoaded', () =>
                     author.onclick = event => messageMenu(event, message);
                 }
                 const time = make('div', '', 'single-chat-message-sender-time');
-                time.append(make('p', new Date(message.time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})));
+                time.append(make('p', message.is_saved ? new Date(message.time).toLocaleString([], {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'}) : new Date(message.time).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})));
                 const body = make('div', '', 'single-chat-message-content');
                 const text = make('p', (message.action ? '* ' : '') + message.text, 'single-chat-message-content-p' + (message.own ? ' local-single-chat-message-content-p' : ''));
                 text.replaceChildren(LemonIrc.Media.render((message.action ? '* ' : '') + message.text, preferences.previews, preferences.site_previews));
@@ -2807,6 +4180,13 @@ document.addEventListener('DOMContentLoaded', () =>
         byId('connections-menu-list').style.display = 'none';
         disconnectedByUser = true;
         socket?.close();
+
+        // a waiting reconnect ends too
+        if (reconnect.timer)
+        {
+            stopReconnect();
+            byId('another-buttons-loading-container-p').textContent = 'Disconnected. Choose Connect to reconnect.';
+        }
     };
     byId('groups-menu').remove();
     byId('choose-theme-button').onclick = () =>
@@ -2863,7 +4243,8 @@ document.addEventListener('DOMContentLoaded', () =>
         return field;
     }
     const identity = byId('connect-identity-section');
-    identity.title = 'The nickname shown to other IRC users';
+    // each field has its own explanation instead of the copied template text
+    identity.title = '';
     identity.replaceChildren(make('legend', 'identity'));
     const nickname = document.createElement('input');
     nickname.id = 'irc-nickname';
@@ -2880,14 +4261,83 @@ document.addEventListener('DOMContentLoaded', () =>
     forgetIdentity.ariaLabel = 'Forget saved identity';
     const identityChoice = gridField(identitySelector, forgetIdentity);
     identityChoice.classList.add('irc-identity-choice');
+    const username = document.createElement('input');
+    username.id = 'irc-username';
+    username.className = 'text-input-pretty';
+    username.maxLength = 10;
+    username.placeholder = 'Letters and digits, up to 10';
+    username.setAttribute('aria-label', 'Username');
+    const realname = document.createElement('input');
+    realname.id = 'irc-realname';
+    realname.className = 'text-input-pretty';
+    realname.maxLength = 50;
+    realname.placeholder = 'Shown in user information';
+    realname.setAttribute('aria-label', 'Real name');
     const identityGrid = make('div', '', 'irc-connect-grid');
-    identityGrid.append(gridLabel('saved', 'irc-identity'), identityChoice, gridLabel('nickname', 'irc-nickname'), gridField(nickname));
-    identity.append(identityGrid);
-    byId('input-ip-address').readOnly = true;
-    byId('input-port-number').readOnly = true;
+    const identityRows = [
+        [gridLabel('saved', 'irc-identity'), identityChoice, 'Names and account saved for this server'],
+        [gridLabel('nickname', 'irc-nickname'), gridField(nickname), 'The name other people see in channels and private chats. You can change it while connected'],
+        [gridLabel('username', 'irc-username'), gridField(username), 'The short name before @ in your address (nickname!username@host). Shown in user information and used in bans. It is not a login name'],
+        [gridLabel('real name', 'irc-realname'), gridField(realname), 'Free text shown in user information. It does not have to be your real name']
+    ];
+    for (const [caption, field, explanation] of identityRows)
+    {
+        caption.title = explanation;
+        field.title = explanation;
+        identityGrid.append(caption, field);
+    }
+    identity.append(identityGrid, make('p', 'Your address is nickname!username@host. The username is not a login name: to log in, use the registered account below. Most servers add ~ in front of the username.', 'connect-section-text'));
     byId('connect-form-grid').style.visibility = 'visible';
     byId('connect-form-grid').classList.add('irc-connect-grid');
     byId('input-ip-address').parentElement.append(button('Choose server', networkBrowser));
+    byId('input-ip-address').title = 'Server address. Choose one from the list, or type your own server or bouncer';
+    byId('input-port-number').title = 'Port of the server, usually 6697 with TLS or 6667 without';
+
+    // own server: encryption, server password and saving
+    const serverTls = document.createElement('input');
+    serverTls.type = 'checkbox';
+    serverTls.id = 'irc-server-tls';
+    const serverTlsLabel = make('label', '', 'irc-identity-check');
+    serverTlsLabel.title = 'Encrypted connection. Most servers use TLS on port 6697';
+    serverTlsLabel.append(serverTls, document.createTextNode(' TLS'));
+    const serverPassword = document.createElement('input');
+    serverPassword.type = 'password';
+    serverPassword.id = 'irc-server-password';
+    serverPassword.className = 'text-input-pretty';
+    serverPassword.autocomplete = 'off';
+    serverPassword.maxLength = 400;
+    serverPassword.placeholder = 'Only for bouncers and closed servers';
+    serverPassword.title = 'Sent as PASS before logging in. ZNC and soju expect it here; most public servers need none';
+    const saveServerButton = button('Save server', () => saveServer());
+    saveServerButton.title = 'Keep this server, encrypted in identities.lemon, at the top of the server list';
+    byId('input-port-number').parentElement.append(serverTlsLabel, saveServerButton);
+
+    // the server password row shows only when needed
+    const serverPasswordRow = [gridLabel('server password', 'irc-server-password'), gridField(serverPassword)];
+    byId('connect-form-grid').append(...serverPasswordRow);
+    const serverPasswordToggle = document.createElement('input');
+    serverPasswordToggle.type = 'checkbox';
+    serverPasswordToggle.id = 'irc-show-server-password';
+    const serverPasswordToggleLabel = make('label', '');
+    serverPasswordToggleLabel.title = 'For bouncers such as ZNC or soju, and for closed servers';
+    serverPasswordToggleLabel.append(serverPasswordToggle, document.createTextNode(' Use a server password'));
+    byId('connect-advanced-toggle').append(serverPasswordToggleLabel);
+    const showServerPasswordRow = () =>
+    {
+        serverPasswordRow.forEach(node => node.hidden = !serverPasswordToggle.checked);
+        if (!serverPasswordToggle.checked)
+        {
+            serverPassword.value = '';
+        }
+        fitConnectionWindow();
+    };
+    serverPasswordToggle.onchange = showServerPasswordRow;
+    serverPasswordRow.forEach(node => node.hidden = true);
+    for (const field of [byId('input-ip-address'), byId('input-port-number'), serverTls])
+    {
+        field.addEventListener('input', showServerName);
+        field.addEventListener('change', showServerName);
+    }
     const credentials = byId('connect-keys-section');
     credentials.title = 'Optional IRC account login through SASL';
     credentials.replaceChildren(make('legend', 'registered account'));
@@ -2899,14 +4349,40 @@ document.addEventListener('DOMContentLoaded', () =>
         control.type = field === 'password' ? 'password' : 'text';
         control.className = 'text-input-pretty';
         control.autocomplete = field === 'password' ? 'current-password' : 'username';
+        control.title = field === 'password' ? 'The password of the registered account' : 'The account name you registered with NickServ, usually your registered nickname. This is the login name';
         credentialGrid.append(gridLabel(field, control.id), gridField(control));
     }
-    credentials.append(credentialGrid, make('p', 'Account names are remembered. Passwords are not saved. Use TLS for account login.', 'connect-section-text'));
+    // saving the password needs unlocked saved identities
+    const savePassword = document.createElement('input');
+    savePassword.type = 'checkbox';
+    savePassword.id = 'irc-save-password';
+    const savePasswordLabel = make('label', '', 'irc-identity-check');
+    savePasswordLabel.title = 'Stored encrypted with your master password in identities.lemon. Unlock saved identities to use it';
+    savePasswordLabel.append(savePassword, document.createTextNode(' save the password with this identity'));
+    credentialGrid.append(make('span', '', 'connect-window-label'), gridField(savePasswordLabel));
+    credentials.append(credentialGrid, make('p', 'Saved identities keep account names and, if you choose, passwords, encrypted with your master password. Use TLS for account login.', 'connect-section-text'));
     // the advanced switch only reveals the account login
     const advancedLabel = byId('connect-show-advanced').parentElement;
     advancedLabel.lastChild.textContent = ' Log in with a registered account';
     // status sits beside the connect button
     byId('another-buttons-sub-container').insertBefore(byId('connect-status-section'), byId('connect-button'));
+    // the channel list's spinner, shown beside "Connecting to …" while an attempt runs
+    const connectSpinner = make('span', '', 'irc-spinner');
+    connectSpinner.id = 'irc-connect-spinner';
+    connectSpinner.setAttribute('aria-hidden', 'true');
+    connectSpinner.style.display = 'none';
+    byId('another-buttons-sub-loading-container').insertBefore(connectSpinner, byId('another-buttons-loading-container-p').parentElement);
+
+    // buttons while an automatic reconnect waits
+    const reconnectActions = make('div', '', 'irc-reconnect-actions');
+    reconnectActions.id = 'irc-reconnect-actions';
+    reconnectActions.style.display = 'none';
+    reconnectActions.append(button('Reconnect now', () => reconnectNow()), button('Stop', () =>
+    {
+        stopReconnect();
+        byId('another-buttons-loading-container-p').textContent = 'Reconnecting stopped. Choose Connect to reconnect.';
+    }));
+    byId('connect-status-section').append(reconnectActions);
     byId('connect-show-advanced').onchange = event =>
     {
         credentials.hidden = !event.target.checked;
@@ -2934,7 +4410,6 @@ document.addEventListener('DOMContentLoaded', () =>
     const unavailable =
     {
         'bookmarks-menu-button': 'Use the globe to choose an IRC server. Saved bookmarks are not implemented yet',
-        'show-secret-identity-string': 'Use the IRC account fields in connection details',
         'microphone-always-broadcasting-audio-button': 'IRC does not provide voice audio',
         'custom-file-upload-button-song': 'IRC does not provide music streaming',
         'stop-song': 'IRC does not provide music streaming',
@@ -2982,6 +4457,18 @@ document.addEventListener('DOMContentLoaded', () =>
     networkButton.setAttribute('aria-label', 'Browse IRC servers');
     networkButton.onclick = networkBrowser;
     flagsButton.before(networkButton);
+
+    // account and command windows
+    const identityButton = byId('show-secret-identity-string');
+    identityButton.title = 'Saved identities, nickname registration and login';
+    identityButton.setAttribute('aria-label', identityButton.title);
+    identityButton.onclick = accountWindow;
+    const commandButton = flagsButton.cloneNode(false);
+    commandButton.id = 'irc-command-window-button';
+    commandButton.title = 'IRC command window';
+    commandButton.setAttribute('aria-label', 'IRC command window');
+    commandButton.onclick = commandPrompt;
+    networkButton.before(commandButton);
     flagsButton.setAttribute('aria-label', 'Show country flags');
     flagsButton.onclick = () =>
     {
@@ -3137,8 +4624,16 @@ document.addEventListener('DOMContentLoaded', () =>
         previews: addPreference('irc-settings-previews', 'show image and media previews', 'loads linked images from their websites and shows audio or video players'),
         site_previews: addPreference('irc-settings-site-previews', 'show website previews', 'loads each linked page to show its title, summary and picture. When off, links are never requested'),
         typing: addPreference('irc-settings-typing', 'tell others when you are typing', 'only used when the network supports typing notifications'),
-        autoscroll: addPreference('irc-settings-autoscroll', 'always scroll to new messages', 'jumps to the end of the chat when a message arrives, even after scrolling up')
+        autoscroll: addPreference('irc-settings-autoscroll', 'always scroll to new messages', 'jumps to the end of the chat when a message arrives, even after scrolling up'),
+        save_history: addPreference('irc-settings-save-history', 'save conversations to a SQLite file', 'writes every message, event and server reply to conversations.sqlite in the folder the program was started from. Passwords sent to services are left out'),
+        show_history: addPreference('irc-settings-show-history', 'show saved messages when a conversation opens', 'shows saved lines above the new messages. Turn off to keep the file only for other programs'),
+        project_address: addPreference('irc-settings-project-address', 'send the project address in version replies', 'answers version requests from other users with Lemon IRC 0.1.0 and https://github.com/azc5OQ/lemon-chat-irc'),
+        reconnect: addPreference('irc-settings-reconnect', 'reconnect automatically', 'after a lost connection, tries again after 5, 10, 30 and 60 seconds, then every 2 minutes, and joins the same channels again'),
+        join_last_channels: addPreference('irc-settings-join-last-channels', 'join the channels of the last session', 'when connecting, joins the channels you were in last time with this identity on this server. The list is kept in the saved identities, which must be unlocked')
     };
+    // the number of saved lines sits below the history settings
+    const historyRange = addRange('irc-history-lines', 'saved lines to show', 'how many saved lines appear when a conversation opens', [10, 500, 10, 100], ' lines', lines => historyLines = lines);
+    preferenceControls.show_history.closest('label').after(historyRange.closest('label'));
     const soundControls = new Map();
     for (const [name, label] of soundOptions)
     {
@@ -3236,8 +4731,8 @@ document.addEventListener('DOMContentLoaded', () =>
     {
         control.disabled = false;
         control.title = '';
-        // website previews stay off until the user turns them on
-        control.checked = key === 'site_previews' ? utils__storage_get(key) === 'true' : utils__storage_get(key) !== 'false';
+        // website previews and conversation saving stay off until the user turns them on
+        control.checked = preferencesOffByDefault.includes(key) ? utils__storage_get(key) === 'true' : utils__storage_get(key) !== 'false';
         preferences[key] = control.checked;
         control.onchange = () =>
         {
@@ -3392,7 +4887,6 @@ document.addEventListener('DOMContentLoaded', () =>
             utils__storage_set(choice.key + '_color_enabled', String(choice.enabled.checked));
         }
         applySounds(soundSetting.checked, true);
-        settings.style.display = 'none';
     };
     byId('local-settings-x-button').onclick = () =>
     {
@@ -3408,8 +4902,8 @@ document.addEventListener('DOMContentLoaded', () =>
         }
         for (const [key, control] of Object.entries(preferenceControls))
         {
-            // website previews stay off until the user turns them on
-        control.checked = key === 'site_previews' ? utils__storage_get(key) === 'true' : utils__storage_get(key) !== 'false';
+            // website previews and conversation saving stay off until the user turns them on
+        control.checked = preferencesOffByDefault.includes(key) ? utils__storage_get(key) === 'true' : utils__storage_get(key) !== 'false';
             preferences[key] = control.checked;
         }
         render();

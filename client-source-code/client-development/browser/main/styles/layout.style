@@ -521,7 +521,7 @@
 }
 
 #channel-properties-edit > #menu-bar-container,
-#channel-password-enter > #menu-bar-container,
+#channel-password-enter > #menu-bar-container, .irc-dialog > #menu-bar-container,
 #musicbot-management-dialog > #menu-bar-container,
 #admin-password-enter > #menu-bar-container,
 #poke-client-enter > #menu-bar-container,
@@ -541,7 +541,7 @@
 }
 
 #channel-properties-edit > #menu-bar-container > .dialog-title,
-#channel-password-enter > #menu-bar-container > .dialog-title,
+#channel-password-enter > #menu-bar-container > .dialog-title, .irc-dialog > #menu-bar-container > .dialog-title,
 #musicbot-management-dialog > #menu-bar-container > .dialog-title,
 #admin-password-enter > #menu-bar-container > .dialog-title,
 #poke-client-enter > #menu-bar-container > .dialog-title,
@@ -566,7 +566,7 @@
 }
 
 #channel-properties-edit .close-button,
-#channel-password-enter .close-button,
+#channel-password-enter .close-button, .irc-dialog .close-button,
 #musicbot-management-dialog .close-button,
 #admin-password-enter .close-button,
 #poke-client-enter .close-button,
@@ -594,7 +594,7 @@
 }
 
 #channel-properties-edit .close-button::before,
-#channel-password-enter .close-button::before,
+#channel-password-enter .close-button::before, .irc-dialog .close-button::before,
 #musicbot-management-dialog .close-button::before,
 #admin-password-enter .close-button::before,
 #poke-client-enter .close-button::before,
@@ -610,7 +610,7 @@
 }
 
 #channel-properties-edit .close-button:hover,
-#channel-password-enter .close-button:hover,
+#channel-password-enter .close-button:hover, .irc-dialog .close-button:hover,
 #musicbot-management-dialog .close-button:hover,
 #admin-password-enter .close-button:hover,
 #poke-client-enter .close-button:hover,

@@ -125,6 +125,8 @@ const {createBridge} = require('../bridge/server.cjs');
         await page.locator('#connect-show-advanced').uncheck();
         await page.setViewportSize({width: 1280, height: 800});
         await page.locator('#irc-nickname').fill('WindowTest');
+        await page.locator('#irc-username').fill('tester');
+        await page.locator('#irc-realname').fill('Lemon Tester');
         await page.locator('#connect-button').click();
         await page.waitForFunction(() => window.ircClient.nick === 'WindowTest');
         assert.ok(await page.locator('#verification-system').isVisible());

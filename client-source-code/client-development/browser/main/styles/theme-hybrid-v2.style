@@ -1259,7 +1259,7 @@ a-toast
 
 #poke-client-enter-container-enter,
 #channel-properties-edit,
-#channel-password-enter,
+#channel-password-enter, .irc-dialog,
 #musicbot-management-dialog,
 #admin-password-enter,
 #secret-identity-string-container-enter
@@ -1856,7 +1856,7 @@ body
 }
 
 #channel-properties-input-container .text-input-not-pretty-2:not([disabled]),
-#channel-password-enter .text-input-not-pretty-2:not([disabled]),
+#channel-password-enter .text-input-not-pretty-2:not([disabled]), .irc-dialog .text-input-not-pretty-2:not([disabled]),
 #musicbot-management-dialog .text-input-not-pretty-2:not([disabled]),
 #admin-password-enter .text-input-not-pretty-2:not([disabled]),
 #poke-client-enter .text-input-not-pretty-2:not([disabled]),
@@ -2819,7 +2819,7 @@ input[type="button"]:disabled
 
 /* Dialogs share the main window's fine borders and dark title bars. */
 #channel-properties-edit,
-#channel-password-enter,
+#channel-password-enter, .irc-dialog,
 #musicbot-management-dialog,
 #admin-password-enter,
 #poke-client-enter,

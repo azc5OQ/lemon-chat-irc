@@ -17,6 +17,8 @@ const {createBridge} = require('../bridge/server.cjs');
         await page.locator('#connections-menu-button').click();
         await page.locator('#connections-menu-connect').click();
         await page.locator('#irc-nickname').fill('Li' + crypto.randomBytes(3).toString('hex'));
+        await page.locator('#irc-username').fill('tester');
+        await page.locator('#irc-realname').fill('Lemon Tester');
         await page.locator('#connect-button').click();
         await page.waitForFunction(() => window.ircClient.connected && window.ircClient.directory.size > 0 && !window.ircClient.listing, null, {timeout: 90000});
         const initialChannels = await page.evaluate(() => window.ircClient.directory.size);

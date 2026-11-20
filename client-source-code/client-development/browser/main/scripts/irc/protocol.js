@@ -94,6 +94,13 @@
             this.capEnded = false;
             this.metadataSubscribed = false;
             this.userQueries = new Map();
+            // commands sent from a window that shows their replies
+            this.trackedCommands = [];
+            this.nextCommandNumber = 1;
+            this.is_reply_tracked = false;
+            // receives each new conversation message, used for saving conversations
+            this.onMessage = null;
+            this.is_project_address_shared = true;
             this.nextId = 1;
             this.status('Choose a nickname and connect.');
         }
@@ -196,6 +203,7 @@
                 conversation.typing.delete(sender.id);
             }
             conversation.messages.push({author, text, time: Number.isFinite(Date.parse(tags.time)) ? tags.time : new Date().toISOString(), own: this.fold(author) === this.fold(this.nick), action, kind});
+            this.onMessage?.(conversation, conversation.messages.at(-1), this);
             if (conversation.messages.length > 500)
             {
                 conversation.messages.shift();
@@ -241,11 +249,206 @@
             this.send(line);
         }
 
-        register(nick, account = '', password = '')
+        /**
+         * @brief sends a command and passes each of its replies to a callback
+         *
+         * @param string line -> irc command line
+         * @param function onReply -> receives {text, packet, is_finished, service}
+         * @param number serviceWait -> milliseconds to collect replies from a service
+         *
+         * @return number command number
+         */
+        writeTracked(line, onReply, serviceWait = 10000)
+        {
+            // check the connection
+            if (!this.connected)
+            {
+                throw new Error('Connect to a server first.');
+            }
+
+            // find the addressed service
+            const outgoing = parse(line);
+            if (!outgoing)
+            {
+                throw new Error('This is not an IRC command.');
+            }
+            const services = {NS: 'NickServ', NICKSERV: 'NickServ', CS: 'ChanServ', CHANSERV: 'ChanServ', MS: 'MemoServ', MEMOSERV: 'MemoServ', OS: 'OperServ', OPERSERV: 'OperServ', HS: 'HostServ', HOSTSERV: 'HostServ', BS: 'BotServ', BOTSERV: 'BotServ'};
+            let service = services[outgoing.command] || '';
+            if (['PRIVMSG', 'NOTICE', 'SQUERY'].includes(outgoing.command) && outgoing.params[0] && !this.channelTypes.includes(outgoing.params[0][0]))
+            {
+                service = outgoing.params[0];
+            }
+
+            // build the record
+            const number = this.nextCommandNumber++;
+            const now = Date.now();
+            const command = {number, label: '', batch: '', marker: '', service, serviceUntil: service ? now + serviceWait : 0, expires: now + 30000, onReply, is_waiting: true};
+
+            // send with a label
+            if (this.enabled.has('labeled-response') && this.enabled.has('batch'))
+            {
+                command.label = 'lemon' + number;
+                this.write(line.startsWith('@') ? '@label=' + command.label + ';' + line.slice(1) : '@label=' + command.label + ' ' + line);
+            }
+
+            // send with a ping
+            else
+            {
+                command.marker = 'lemon-command-' + number;
+                this.write(line);
+                this.write('PING :' + command.marker);
+            }
+            this.trackedCommands.push(command);
+            return number;
+        }
+
+        /**
+         * @brief writes a received line as readable text
+         *
+         * @param object packet -> parsed message
+         *
+         * @return string text for a command window
+         */
+        describeLine(packet)
+        {
+            const {command, params: p, nick} = packet;
+            const plain = text => text.replace(/\x03\d{0,2}(,\d{1,2})?|[\x01\x02\x0f\x16\x1d\x1e\x1f]/g, '');
+
+            // message from a person
+            if (['PRIVMSG', 'NOTICE'].includes(command))
+            {
+                return (nick || 'server') + ': ' + plain(p[1] || '');
+            }
+
+            // numeric reply
+            if (/^\d{3}$/.test(command))
+            {
+                return plain(command + ' ' + p.slice(1).join(' '));
+            }
+            return plain((nick ? nick + ' ' : '') + command + ' ' + p.join(' '));
+        }
+
+        /**
+         * @brief passes a received line to the commands waiting for replies
+         *
+         * @param object packet -> parsed message
+         *
+         * @return boolean whether the line is only a reply marker and is not shown
+         */
+        matchTrackedReply(packet)
+        {
+            const {command, params: p, tags, nick, prefix} = packet;
+            const now = Date.now();
+            this.is_reply_tracked = false;
+
+            // remove finished commands
+            this.trackedCommands = this.trackedCommands.filter(entry => (entry.is_waiting && now < entry.expires) || now < entry.serviceUntil);
+            if (!this.trackedCommands.length)
+            {
+                return false;
+            }
+
+            // reply callbacks
+            const deliver = entry =>
+            {
+                this.is_reply_tracked = true;
+                entry.onReply({text: this.describeLine(packet), packet, is_finished: false});
+            };
+            const finish = entry =>
+            {
+                entry.is_waiting = false;
+                entry.onReply({text: '', packet, is_finished: true, service: entry.service});
+            };
+            let is_marker_taken = false;
+            for (const entry of this.trackedCommands)
+            {
+                // labeled replies
+                if (entry.label && entry.is_waiting)
+                {
+                    if (tags.label === entry.label)
+                    {
+                        if (command === 'BATCH' && p[0]?.startsWith('+'))
+                        {
+                            entry.batch = p[0].slice(1);
+                            return false;
+                        }
+                        if (command === 'ACK')
+                        {
+                            finish(entry);
+                            return true;
+                        }
+                        deliver(entry);
+                        finish(entry);
+                        return false;
+                    }
+                    if (entry.batch && tags.batch === entry.batch)
+                    {
+                        deliver(entry);
+                        return false;
+                    }
+                    if (entry.batch && command === 'BATCH' && p[0] === '-' + entry.batch)
+                    {
+                        finish(entry);
+                        return false;
+                    }
+                }
+
+                // replies before the ping
+                if (entry.marker && entry.is_waiting && !is_marker_taken)
+                {
+                    is_marker_taken = true;
+                    if (command === 'PONG' && p.at(-1) === entry.marker)
+                    {
+                        finish(entry);
+                        return true;
+                    }
+                    const is_from_server = !prefix.includes('!') || this.fold(nick) === this.fold(this.nick);
+                    if (is_from_server && !['PING', 'PONG', 'BATCH'].includes(command))
+                    {
+                        deliver(entry);
+                        return false;
+                    }
+                }
+
+                // replies from a service
+                if (entry.service && now < entry.serviceUntil && ['PRIVMSG', 'NOTICE'].includes(command) && prefix.includes('!') && this.fold(nick) === this.fold(entry.service) && this.fold(p[0] || '') === this.fold(this.nick))
+                {
+                    deliver(entry);
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        /**
+         * @brief reads the account registration offer of the server
+         *
+         * @return object {is_available, is_email_required, is_custom_account_name}
+         */
+        accountRegistration()
+        {
+            const offer = this.capabilities.find(cap => cap === 'draft/account-registration' || cap.startsWith('draft/account-registration='));
+            const options = offer?.includes('=') ? offer.slice(offer.indexOf('=') + 1).split(',') : [];
+            return {is_available: Boolean(offer), is_email_required: options.includes('email-required'), is_custom_account_name: options.includes('custom-account-name')};
+        }
+
+        register(nick, account = '', password = '', username = '', realname = '', serverPassword = '')
         {
             if (!/^[A-Za-z_\[\]\\`^{}|][A-Za-z0-9_\[\]\\`^{}|\-]{0,29}$/.test(nick))
             {
                 throw new Error('Choose a nickname with letters and numbers, without spaces.');
+            }
+            if (!/^[A-Za-z0-9_.\-]{1,10}$/.test(username))
+            {
+                throw new Error('Enter a username: letters, digits, _ - . and at most 10 characters.');
+            }
+            if (!realname.trim() || realname.length > 50 || /[\0\r\n]/.test(realname))
+            {
+                throw new Error('Enter a real name of at most 50 characters.');
+            }
+            if (serverPassword.length > 400 || /[\0\r\n]/.test(serverPassword))
+            {
+                throw new Error('The server password is too long or contains a line break.');
             }
             this.nick = nick;
             this.operator = false;
@@ -273,8 +476,14 @@
                 throw new Error('Enter both an account name and password, or leave both empty.');
             }
             this.write('CAP LS 302');
+
+            // password of a bouncer or closed server, before NICK and USER
+            if (serverPassword)
+            {
+                this.write('PASS :' + serverPassword);
+            }
             this.write('NICK ' + nick);
-            this.write('USER lemonirc 0 * :Lemon IRC');
+            this.write('USER ' + username + ' 0 * :' + realname);
         }
 
         /**
@@ -510,7 +719,7 @@
                     return;
                 }
                 const available = new Set(this.capabilities.map(cap => cap.split('=')[0]));
-                const supported = ['server-time', 'multi-prefix', 'message-tags', 'account-tag', 'account-notify', 'away-notify', 'extended-join', 'userhost-in-names', 'chghost', 'setname', 'batch'];
+                const supported = ['server-time', 'multi-prefix', 'message-tags', 'account-tag', 'account-notify', 'away-notify', 'extended-join', 'userhost-in-names', 'chghost', 'setname', 'batch', 'labeled-response', 'draft/account-registration'];
                 if (available.has('batch'))
                 {
                     supported.push('draft/metadata-2');
@@ -661,7 +870,18 @@
                 if (this.connected && Date.now() - (this.lastVersionReply || 0) >= 10000)
                 {
                     this.lastVersionReply = Date.now();
-                    this.write('NOTICE ' + nick + ' :\x01VERSION Lemon IRC 0.1.0\x01');
+                    this.write('NOTICE ' + nick + ' :\x01VERSION Lemon IRC 0.1.0' + (this.is_project_address_shared ? ' https://github.com/azc5OQ/lemon-chat-irc' : '') + '\x01');
+                }
+                return true;
+            }
+
+            // project address request
+            if (command === 'PRIVMSG' && p[1] === '\x01SOURCE\x01' && prefix.includes('!') && this.fold(p[0]) === this.fold(this.nick))
+            {
+                if (this.connected && this.is_project_address_shared && Date.now() - (this.lastVersionReply || 0) >= 10000)
+                {
+                    this.lastVersionReply = Date.now();
+                    this.write('NOTICE ' + nick + ' :\x01SOURCE https://github.com/azc5OQ/lemon-chat-irc\x01');
                 }
                 return true;
             }
@@ -776,6 +996,12 @@
                 return;
             }
             const {command, params: p, nick, tags} = packet;
+
+            // match command replies
+            if (this.matchTrackedReply(packet))
+            {
+                return;
+            }
             this.recordActivity(packet);
             if (['PRIVMSG', 'NOTICE', 'TAGMSG'].includes(command) && packet.prefix.includes('!') && this.isIgnored(nick))
             {

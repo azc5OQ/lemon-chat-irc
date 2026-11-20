@@ -6,7 +6,7 @@ function connected()
 {
     const sent = [];
     const client = new Client(line => sent.push(line));
-    client.register('me');
+    client.register('me', '', '', 'lemontest', 'Lemon Test');
     client.receive(':s CAP * LS :');
     client.receive(':s 001 me :Welcome');
     client.receive(':s 005 me CHANMODES=b,k,l,imnst PREFIX=(ov)@+ :supported');

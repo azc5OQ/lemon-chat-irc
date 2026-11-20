@@ -64,7 +64,7 @@ test('connection time survives nickname changes and channel leaves but not quitt
     assert.equal(user.fields.has('Connected since'), false);
     client.requestUserInfo('Alicia', true);
     client.receive(':s 317 Me Alicia 80 1700000001 :new connection');
-    client.register('Me');
+    client.register('Me', '', '', 'lemontest', 'Lemon Test');
     assert.equal(user.connectedAt, 0);
     assert.equal(user.connectionTimeChecked, false);
     assert.equal(user.fields.has('Connected since'), false);

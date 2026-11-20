@@ -1945,7 +1945,7 @@ a-toast:hover {
     padding-bottom: 8px;
 }
 
-#poke-client-enter-container-enter, #channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #secret-identity-string-container-enter {
+#poke-client-enter-container-enter, #channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #secret-identity-string-container-enter {
     top: 25%;
     width: 322px;
 
@@ -1991,7 +1991,7 @@ a-toast:hover {
    layout.style's plain cross loads after the themes and would win a specificity tie */
 :is(#server-settings-tab, #groups-dialog, #groups-log-dialog, #groups-icon-picker, #moderation-dialog, #server-info-dialog, #video-stream-popup) .close-button.close-button,
 #channel-properties-edit .close-button.close-button,
-#channel-password-enter .close-button.close-button,
+#channel-password-enter .close-button.close-button, .irc-dialog .close-button.close-button,
 #musicbot-management-dialog .close-button.close-button,
 #admin-password-enter .close-button.close-button,
 #poke-client-enter .close-button.close-button,
@@ -2014,7 +2014,7 @@ a-toast:hover {
 
 :is(#server-settings-tab, #groups-dialog, #groups-log-dialog, #groups-icon-picker, #moderation-dialog, #server-info-dialog, #video-stream-popup) .close-button.close-button::before,
 #channel-properties-edit .close-button.close-button::before,
-#channel-password-enter .close-button.close-button::before,
+#channel-password-enter .close-button.close-button::before, .irc-dialog .close-button.close-button::before,
 #musicbot-management-dialog .close-button.close-button::before,
 #admin-password-enter .close-button.close-button::before,
 #poke-client-enter .close-button.close-button::before,
@@ -2030,7 +2030,7 @@ a-toast:hover {
 
 :is(#server-settings-tab, #groups-dialog, #groups-log-dialog, #groups-icon-picker, #moderation-dialog, #server-info-dialog, #video-stream-popup) .close-button.close-button:hover,
 #channel-properties-edit .close-button.close-button:hover,
-#channel-password-enter .close-button.close-button:hover,
+#channel-password-enter .close-button.close-button:hover, .irc-dialog .close-button.close-button:hover,
 #musicbot-management-dialog .close-button.close-button:hover,
 #admin-password-enter .close-button.close-button:hover,
 #poke-client-enter .close-button.close-button:hover,

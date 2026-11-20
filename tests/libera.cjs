@@ -19,7 +19,7 @@ const {Client} = require('../client-source-code/client-development/browser/main/
             let joined = false;
             const client = new Client(line => ws.send(line));
             ws = new WebSocket(bridge.origin.replace('http:', 'ws:') + '/irc?token=' + bridge.token, 'text.ircv3.net', {origin: bridge.origin});
-            ws.on('open', () => client.register(nick));
+            ws.on('open', () => client.register(nick, '', '', 'lemontest', 'Lemon Test'));
             ws.on('error', reject);
             ws.on('close', (code, reason) =>
             {

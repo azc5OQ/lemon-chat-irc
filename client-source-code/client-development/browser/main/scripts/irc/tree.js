@@ -117,6 +117,32 @@ LemonIrc.Tree = class
         this.container.querySelector('[data-irc-tree-row="' + index + '"]')?.focus({preventScroll: true});
     }
 
+    /**
+     * @brief scrolls the list so the row of an entry is visible, without moving the keyboard focus
+     *
+     * @param string id -> entry identifier, for example channel:#name
+     *
+     * @return void
+     */
+    reveal(id)
+    {
+        const index = this.entries.findIndex(entry => entry.id === id);
+        if (index < 0)
+        {
+            return;
+        }
+
+        // already visible
+        const view = this.container.scrollTop;
+        if (this.offsets[index] >= view && this.offsets[index + 1] <= view + this.container.clientHeight)
+        {
+            return;
+        }
+
+        // a third from the top
+        this.draw(true, Math.max(0, this.offsets[index] - this.container.clientHeight / 3));
+    }
+
     keydown(event)
     {
         if (event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input, textarea'))

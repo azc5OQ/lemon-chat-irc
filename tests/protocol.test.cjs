@@ -6,7 +6,7 @@ test('nickname conflicts use a fallback without replacing the preference', () =>
 {
     const sent = [];
     const client = new Client(line => sent.push(line));
-    client.register('PreferredName');
+    client.register('PreferredName', '', '', 'lemontest', 'Lemon Test');
     assert.equal(client.receive(':s 433 * PreferredName :Already in use'), true);
     const fallback = client.nick;
     assert.match(fallback, /^Prefe\d{4}$/);
@@ -152,7 +152,7 @@ test('capability continuation, tags, ping, roles and UTF8 limits', () =>
 {
     const sent = [];
     const client = new Client(line => sent.push(line));
-    client.register('LemonTest');
+    client.register('LemonTest', '', '', 'lemontest', 'Lemon Test');
     client.receive(':s CAP * LS * :multi-prefix');
     assert.equal(sent.length, 3);
     client.receive(':s CAP * LS :server-time');
@@ -190,7 +190,7 @@ test('SASL waits for success and fails closed when unavailable', () =>
 {
     const lines = [];
     const client = new Client(line => lines.push(line));
-    client.register('Example', 'account', 'password');
+    client.register('Example', 'account', 'password', 'lemontest', 'Lemon Test');
     client.receive(':s CAP * LS :sasl=PLAIN,EXTERNAL');
     assert.equal(lines.at(-1), 'CAP REQ :sasl');
     client.receive(':s CAP * ACK :sasl');
@@ -200,8 +200,77 @@ test('SASL waits for success and fails closed when unavailable', () =>
     assert.equal(client.password, '');
     client.receive(':s 903 Example :success');
     assert.equal(lines.at(-1), 'CAP END');
-    client.register('Example', 'account', 'password');
+    client.register('Example', 'account', 'password', 'lemontest', 'Lemon Test');
     client.capabilities = [];
     assert.throws(() => client.receive(':s CAP * LS :server-time'), /does not offer/);
     assert.equal(lines.at(-1), 'QUIT :SASL PLAIN unavailable');
+});
+
+test('username and real name are sent with USER and are required', () =>
+{
+    const lines = [];
+    const client = new Client(line => lines.push(line));
+    client.register('Example', '', '', 'my.user', 'My Real Name');
+    assert.equal(lines.at(-1), 'USER my.user 0 * :My Real Name');
+    assert.throws(() => client.register('Example'), /Enter a username/);
+    assert.throws(() => client.register('Example', '', '', 'with space', 'Name'), /Enter a username/);
+    assert.throws(() => client.register('Example', '', '', 'elevenchars', 'Name'), /Enter a username/);
+    assert.throws(() => client.register('Example', '', '', 'user', ' '), /Enter a real name/);
+    assert.throws(() => client.register('Example', '', '', 'user', 'x'.repeat(51)), /Enter a real name/);
+});
+
+test('command replies are matched by a ping and by service nickname', () =>
+{
+    const lines = [];
+    const replies = [];
+    const client = new Client(line => lines.push(line));
+    client.nick = 'me';
+    client.connected = true;
+    client.writeTracked('PRIVMSG NickServ :INFO me', reply => replies.push(reply));
+    assert.deepEqual(lines.slice(-2), ['PRIVMSG NickServ :INFO me', 'PING :lemon-command-1']);
+    client.receive(':Alice!u@h PRIVMSG #a :not a reply');
+    client.receive(':s 263 me INFO :wait');
+    client.receive(':s PONG s :lemon-command-1');
+    client.receive(':NickServ!s@services NOTICE me :Information on \x02me\x02');
+    client.receive(':Bob!u@h NOTICE me :not a reply');
+    assert.deepEqual(replies.filter(reply => !reply.is_finished).map(reply => reply.text), ['263 INFO wait', 'NickServ: Information on me']);
+    assert.equal(replies.filter(reply => reply.is_finished).length, 1);
+    assert.equal(client.conversation('network').messages.some(message => message.text.includes('lemon-command')), false);
+    assert.throws(() => new Client(() => {}).writeTracked('VERSION', () => {}), /Connect to a server first/);
+});
+
+test('command replies are matched by label when the server offers labeled responses', () =>
+{
+    const lines = [];
+    const replies = [];
+    const client = new Client(line => lines.push(line));
+    client.register('me', '', '', 'user', 'Name');
+    client.receive(':s CAP * LS :batch labeled-response draft/account-registration=before-connect,email-required');
+    assert.equal(lines.at(-1), 'CAP REQ :batch labeled-response draft/account-registration');
+    client.receive(':s CAP * ACK :batch labeled-response draft/account-registration');
+    client.receive(':s 001 me :welcome');
+    assert.deepEqual(client.accountRegistration(), {is_available: true, is_email_required: true, is_custom_account_name: false});
+    client.writeTracked('WHO me', reply => replies.push(reply));
+    assert.equal(lines.at(-1), '@label=lemon1 WHO me');
+    client.receive('@label=lemon1 :s BATCH +b1 labeled-response');
+    client.receive('@batch=b1 :s 352 me * u h s me H :0 Name');
+    client.receive('@batch=b1 :s 315 me me :End of WHO');
+    client.receive(':s BATCH -b1');
+    client.receive('@batch=b1 :s 352 me * u h s other H :0 Name');
+    assert.deepEqual(replies.filter(reply => !reply.is_finished).map(reply => reply.text), ['352 * u h s me H 0 Name', '315 me End of WHO']);
+    client.writeTracked('MODE me +i', reply => replies.push(reply));
+    client.receive('@label=lemon2 :s ACK');
+    assert.equal(replies.at(-1).is_finished, true);
+});
+
+test('a server password is sent with PASS before NICK and USER', () =>
+{
+    const lines = [];
+    const client = new Client(line => lines.push(line));
+    client.register('Example', '', '', 'user', 'Name', 'znc-user:secret pass');
+    assert.deepEqual(lines, ['CAP LS 302', 'PASS :znc-user:secret pass', 'NICK Example', 'USER user 0 * :Name']);
+    lines.length = 0;
+    client.register('Example', '', '', 'user', 'Name');
+    assert.equal(lines.some(line => line.startsWith('PASS')), false);
+    assert.throws(() => client.register('Example', '', '', 'user', 'Name', 'bad\npassword'), /server password/);
 });

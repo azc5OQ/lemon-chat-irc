@@ -424,7 +424,7 @@ div#image-upload-preview {
     padding: 4px 8px;
 }
 
-#channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter,
+#channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter,
 #set-new-username-enter, #identity-string-use-container-enter, #secret-identity-string-container-enter,
 #client-info-enter, #server-settings-tab {
     background: var(--tmx-sidebar);
@@ -1182,7 +1182,7 @@ a-toast:hover { background-color: var(--tmx-hover) !important; }
     to   { opacity: 1; }
 }
 
-#channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter,
+#channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter,
 #set-new-username-enter, #identity-string-use-container-enter, #secret-identity-string-container-enter,
 #client-info-enter, #server-settings-tab {
     animation: tmx-pop 0.16s ease-out;

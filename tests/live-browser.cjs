@@ -67,6 +67,8 @@ const {networks} = require('../networks.json');
                     await page.getByRole('button', {name: 'Browse IRC servers', exact: true}).click();
                     await page.getByRole('button', {name: 'Choose ' + network.name, exact: true}).click();
                     await page.locator('#irc-nickname').fill(nickname);
+                    await page.locator('#irc-username').fill('tester');
+                    await page.locator('#irc-realname').fill('Lemon Tester');
                     await page.locator('#connect-button').click();
                     await page.waitForFunction(() => window.ircClient.connected, null, {timeout: 60000});
                     await page.waitForFunction(() => !window.ircClient.listing, null, {timeout: 90000});

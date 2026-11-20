@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const net = require('node:net');
 const {once} = require('node:events');
 const WebSocket = require('../vendor/ws');
+const fs = require('node:fs');
+const path = require('node:path');
 const {createBridge} = require('../bridge/server.cjs');
 
 test('loopback bridge checks origin and token, forwards lines and rejects injection', {timeout: 15000}, async () =>
@@ -100,5 +102,103 @@ test('the selected network reaches its configured server', {timeout: 15000}, asy
         {
             server.close();
         }
+    }
+});
+
+test('saved conversations are stored in SQLite and returned only to the page', {timeout: 15000}, async () =>
+{
+    fs.mkdirSync(path.join(__dirname, '../test-results'), {recursive: true});
+    const folder = fs.mkdtempSync(path.join(__dirname, '../test-results/history-'));
+    const bridge = await createBridge({port: 0, historyFile: path.join(folder, 'conversations.sqlite')});
+    try
+    {
+        const address = bridge.origin + '/history?token=' + bridge.token;
+        const entries = [
+            {network: 'libera', conversation: 'channel:#a', name: '#a', author: 'Alice', text: 'first', time: '2026-11-20T10:00:00.000Z', kind: 'info', is_own: false, is_action: false},
+            {network: 'libera', conversation: 'channel:#a', name: '#a', author: 'me', text: 'waves', time: '2026-11-20T10:01:00.000Z', kind: 'info', is_own: true, is_action: true},
+            {network: 'libera', conversation: 'channel:#b', name: '#b', author: 'Bob', text: 'other', time: '2026-11-20T10:02:00.000Z', kind: 'info', is_own: false, is_action: false}
+        ];
+        const post = (body, origin = bridge.origin, token = bridge.token) => fetch(bridge.origin + '/history?token=' + token, {method: 'POST', headers: {'Content-Type': 'application/json', Origin: origin}, body});
+        assert.equal((await post(JSON.stringify(entries))).status, 200);
+        assert.equal((await post(JSON.stringify(entries), 'https://example.com')).status, 403);
+        assert.equal((await post(JSON.stringify(entries), bridge.origin, 'wrong')).status, 403);
+        assert.equal((await post('not json')).status, 400);
+        const saved = await fetch(address + '&network=libera&conversation=channel:%23a&limit=10').then(response => response.json());
+        assert.deepEqual(saved.map(row => [row.author, row.text, row.is_own, row.is_action]), [['Alice', 'first', 0, 0], ['me', 'waves', 1, 1]]);
+        const older = await fetch(address + '&network=libera&conversation=channel:%23a&limit=10&before=2026-11-20T10:01:00.000Z').then(response => response.json());
+        assert.deepEqual(older.map(row => row.text), ['first']);
+        const limited = await fetch(address + '&network=libera&conversation=channel:%23a&limit=1').then(response => response.json());
+        assert.deepEqual(limited.map(row => row.text), ['waves']);
+        assert.equal((await fetch(bridge.origin + '/history?token=wrong&network=libera&conversation=channel:%23a&limit=10')).status, 403);
+    }
+    finally
+    {
+        bridge.close();
+        fs.rmSync(folder, {recursive: true, force: true});
+    }
+});
+
+test('the encrypted identities file is stored as sent and returned only to the page', {timeout: 15000}, async () =>
+{
+    fs.mkdirSync(path.join(__dirname, '../test-results'), {recursive: true});
+    const folder = fs.mkdtempSync(path.join(__dirname, '../test-results/identities-'));
+    const file = path.join(folder, 'identities.lemon');
+    const bridge = await createBridge({port: 0, identitiesFile: file});
+    try
+    {
+        const address = bridge.origin + '/identities?token=' + bridge.token;
+        const post = (body, origin = bridge.origin) => fetch(address, {method: 'POST', headers: {'Content-Type': 'application/json', Origin: origin}, body});
+        assert.deepEqual(await fetch(address).then(response => response.json()), {is_existing: false});
+        const content = {version: 1, iterations: 600000, salt: 'c2FsdA==', iv: 'aXY=', data: 'ZGF0YQ=='};
+        assert.equal((await post(JSON.stringify(content))).status, 200);
+        assert.deepEqual(await fetch(address).then(response => response.json()), {is_existing: true, file: content});
+        assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), content);
+        assert.equal((await post(JSON.stringify(content), 'https://example.com')).status, 403);
+        assert.equal((await post(JSON.stringify({...content, data: 'not base64 <>'}))).status, 400);
+        assert.equal((await post(JSON.stringify({...content, version: 2}))).status, 400);
+        assert.equal((await fetch(bridge.origin + '/identities?token=wrong')).status, 403);
+        assert.equal(fs.existsSync(file + '.new'), false);
+    }
+    finally
+    {
+        bridge.close();
+        fs.rmSync(folder, {recursive: true, force: true});
+    }
+});
+
+test('a server typed by the user is reached through host, port and tls, invalid values are refused', {timeout: 15000}, async () =>
+{
+    const lines = [];
+    const tcp = net.createServer(socket =>
+    {
+        socket.on('data', data =>
+        {
+            lines.push(data.toString());
+            socket.write(':custom NOTICE * :typed server\r\n');
+        });
+    });
+    tcp.listen(0, '127.0.0.1');
+    await once(tcp, 'listening');
+    const bridge = await createBridge({port: 0, networks: []});
+    try
+    {
+        const address = bridge.origin.replace('http', 'ws') + '/irc?token=' + bridge.token;
+        const ws = new WebSocket(address + '&host=127.0.0.1&port=' + tcp.address().port + '&tls=false', 'text.ircv3.net', {origin: bridge.origin});
+        await once(ws, 'open');
+        const reply = once(ws, 'message');
+        ws.send('NICK typed');
+        assert.equal(String((await reply)[0]), ':custom NOTICE * :typed server');
+        assert.match(lines.join(''), /NICK typed\r\n/);
+        ws.close();
+        for (const query of ['&host=bad host&port=6667', '&host=example.org&port=0', '&host=example.org&port=70000', '&host=a/b&port=6667', '&host=&port=6667'])
+        {
+            const refused = new WebSocket(address + query, 'text.ircv3.net', {origin: bridge.origin});
+            assert.match((await once(refused, 'error'))[0].message, /403/);
+        }
+    }
+    finally
+    {
+        bridge.close();
+        tcp.close();
     }
 });

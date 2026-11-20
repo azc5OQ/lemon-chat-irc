@@ -20,6 +20,8 @@ __pycache__/
 # local bridge data
 bridge.token
 networks.cache.json
+conversations.sqlite*
+identities.lemon*
 *.log
 *.key
 *.pem

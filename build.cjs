@@ -43,6 +43,7 @@ const scripts = [
     fs.readFileSync(path.join(source, 'scripts/irc/protocol.js'), 'utf8'),
     fs.readFileSync(path.join(source, 'scripts/irc/media.js'), 'utf8'),
     fs.readFileSync(path.join(source, 'scripts/irc/identities.js'), 'utf8'),
+    fs.readFileSync(path.join(source, 'scripts/irc/accounts.js'), 'utf8'),
     fs.readFileSync(path.join(source, 'scripts/irc/tree.js'), 'utf8'),
     fs.readFileSync(path.join(source, 'scripts/irc/view.js'), 'utf8'),
     fs.readFileSync(path.join(source, 'scripts/irc/management.js'), 'utf8'),

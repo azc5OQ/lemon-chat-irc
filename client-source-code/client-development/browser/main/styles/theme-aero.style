@@ -142,7 +142,7 @@
     border-color: #3d7ac8;
 }
 
-#channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter, #set-new-username-enter, #identity-string-use-container-enter, #secret-identity-string-container-enter
+#channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter, #set-new-username-enter, #identity-string-use-container-enter, #secret-identity-string-container-enter
 {
     background: #f4f4f4;
     border: 1px solid rgba(61, 122, 200, 0.18);
@@ -1776,7 +1776,7 @@ a-toast:hover
     padding-bottom: 8px;
 }
 
-#poke-client-enter-container-enter, #channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #secret-identity-string-container-enter
+#poke-client-enter-container-enter, #channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #secret-identity-string-container-enter
 {
     top: 25%;
     width: 322px;
@@ -1860,7 +1860,7 @@ a-toast:hover
     background-color: rgba(61,122,200,0.18);
 }
 
-#poke-client-enter, #set-new-username-enter, #poke-client-enter-container-enter, #channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #secret-identity-string-container-enter, #identity-string-use-container-enter
+#poke-client-enter, #set-new-username-enter, #poke-client-enter-container-enter, #channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #secret-identity-string-container-enter, #identity-string-use-container-enter
 {
     background-color: #f8f8f8;
     border: 1px solid #c0c0c0;
@@ -2564,7 +2564,7 @@ body, input, button, textarea, select, p, li, label
     top: 0 !important;
 }
 
-#channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter, #set-new-username-enter, #identity-string-use-container-enter, #secret-identity-string-container-enter, #client-info-container
+#channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter, #set-new-username-enter, #identity-string-use-container-enter, #secret-identity-string-container-enter, #client-info-container
 {
     border-radius: 0 !important;
     border: 1px solid #808080 !important;
@@ -2601,7 +2601,7 @@ body, input, button, textarea, select, p, li, label
     border-color: #3d7ac8 !important;
 }
 
-#channel-properties-input-container .text-input-not-pretty-2, #channel-password-enter .text-input-not-pretty-2, #musicbot-management-dialog .text-input-not-pretty-2, #admin-password-enter .text-input-not-pretty-2, #poke-client-enter .text-input-not-pretty-2, #set-new-username-enter .text-input-not-pretty-2
+#channel-properties-input-container .text-input-not-pretty-2, #channel-password-enter .text-input-not-pretty-2, .irc-dialog .text-input-not-pretty-2, #musicbot-management-dialog .text-input-not-pretty-2, #admin-password-enter .text-input-not-pretty-2, #poke-client-enter .text-input-not-pretty-2, #set-new-username-enter .text-input-not-pretty-2
 {
     border-radius: 0 !important;
     border: 1px solid #7f9db9 !important;
@@ -2633,7 +2633,7 @@ body, input, button, textarea, select, p, li, label
     color: #ffffff !important;
 }
 
-#channel-properties-input-container .text-input-not-pretty-2[disabled], #channel-password-enter .text-input-not-pretty-2[disabled], #musicbot-management-dialog .text-input-not-pretty-2[disabled], #admin-password-enter .text-input-not-pretty-2[disabled], #poke-client-enter .text-input-not-pretty-2[disabled], #set-new-username-enter .text-input-not-pretty-2[disabled]
+#channel-properties-input-container .text-input-not-pretty-2[disabled], #channel-password-enter .text-input-not-pretty-2[disabled], .irc-dialog .text-input-not-pretty-2[disabled], #musicbot-management-dialog .text-input-not-pretty-2[disabled], #admin-password-enter .text-input-not-pretty-2[disabled], #poke-client-enter .text-input-not-pretty-2[disabled], #set-new-username-enter .text-input-not-pretty-2[disabled]
 {
     border: none !important;
     background: transparent !important;
@@ -2678,12 +2678,12 @@ body, input, button, textarea, select, p, li, label
     color: #000000 !important;
 }
 
-#channel-properties-edit, #channel-properties-edit *, #channel-password-enter, #musicbot-management-dialog, #channel-password-enter *, #musicbot-management-dialog *, #admin-password-enter, #admin-password-enter *, #poke-client-enter, #poke-client-enter *, #set-new-username-enter, #set-new-username-enter *, #client-info-container, #client-info-container *, #identity-string-use-container, #identity-string-use-container *, #secret-identity-string-container-enter, #secret-identity-string-container-enter *
+#channel-properties-edit, #channel-properties-edit *, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #channel-password-enter *, .irc-dialog *, #musicbot-management-dialog *, #admin-password-enter, #admin-password-enter *, #poke-client-enter, #poke-client-enter *, #set-new-username-enter, #set-new-username-enter *, #client-info-container, #client-info-container *, #identity-string-use-container, #identity-string-use-container *, #secret-identity-string-container-enter, #secret-identity-string-container-enter *
 {
     font-family: Arial,  Tahoma, "Segoe UI", sans-serif !important;
 }
 
-#channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter, #set-new-username-enter, #identity-string-use-container-enter, #secret-identity-string-container-enter, #client-info-enter
+#channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #poke-client-enter, #set-new-username-enter, #identity-string-use-container-enter, #secret-identity-string-container-enter, #client-info-enter
 {
     background: #ffffff !important;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28) !important;
@@ -2709,7 +2709,7 @@ body, input, button, textarea, select, p, li, label
     box-shadow: none !important;
 }
 
-#channel-properties-input-container .text-input-not-pretty-2:not([disabled]), #channel-password-enter .text-input-not-pretty-2:not([disabled]), #musicbot-management-dialog .text-input-not-pretty-2:not([disabled]), #admin-password-enter .text-input-not-pretty-2:not([disabled]), #poke-client-enter .text-input-not-pretty-2:not([disabled]), #set-new-username-enter .text-input-not-pretty-2:not([disabled])
+#channel-properties-input-container .text-input-not-pretty-2:not([disabled]), #channel-password-enter .text-input-not-pretty-2:not([disabled]), .irc-dialog .text-input-not-pretty-2:not([disabled]), #musicbot-management-dialog .text-input-not-pretty-2:not([disabled]), #admin-password-enter .text-input-not-pretty-2:not([disabled]), #poke-client-enter .text-input-not-pretty-2:not([disabled]), #set-new-username-enter .text-input-not-pretty-2:not([disabled])
 {
     border: 1px solid #7a7a7a !important;
     border-radius: 0 !important;
@@ -3486,7 +3486,7 @@ input:focus-visible, button:focus-visible, textarea:focus-visible, select:focus-
 #server-settings-tab,
 #local-settings-container,
 #channel-properties-edit,
-#channel-password-enter,
+#channel-password-enter, .irc-dialog,
 #musicbot-management-dialog,
 #admin-password-enter,
 #poke-client-enter,
@@ -3700,7 +3700,7 @@ input:focus-visible, button:focus-visible, textarea:focus-visible, select:focus-
 }
 
 #channel-properties-edit *,
-#channel-password-enter *,
+#channel-password-enter *, .irc-dialog *,
 #musicbot-management-dialog *,
 #admin-password-enter *,
 #poke-client-enter *,
@@ -3756,7 +3756,7 @@ input:is(.text-input-pretty, .text-input-not-pretty, .text-input-not-pretty-2),
 .text-input-not-pretty:not([disabled]),
 .text-input-not-pretty-2:not([disabled]),
 #channel-properties-input-container .text-input-not-pretty-2:not([disabled]),
-#channel-password-enter .text-input-not-pretty-2:not([disabled]),
+#channel-password-enter .text-input-not-pretty-2:not([disabled]), .irc-dialog .text-input-not-pretty-2:not([disabled]),
 #musicbot-management-dialog .text-input-not-pretty-2:not([disabled]),
 #admin-password-enter .text-input-not-pretty-2:not([disabled]),
 #poke-client-enter .text-input-not-pretty-2:not([disabled]),

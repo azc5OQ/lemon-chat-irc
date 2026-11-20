@@ -1973,7 +1973,7 @@ a-toast:hover {
     padding-bottom: 8px;
 }
 
-#poke-client-enter-container-enter, #channel-properties-edit, #channel-password-enter, #musicbot-management-dialog, #admin-password-enter, #secret-identity-string-container-enter {
+#poke-client-enter-container-enter, #channel-properties-edit, #channel-password-enter, .irc-dialog, #musicbot-management-dialog, #admin-password-enter, #secret-identity-string-container-enter {
     top: 25%;
     width: 322px;
     height: 219px;
@@ -2168,7 +2168,7 @@ body.android-app #android-server-settings-button {
     }
 
 #channel-properties-edit,
-#channel-password-enter,
+#channel-password-enter, .irc-dialog,
 #musicbot-management-dialog,
 #admin-password-enter,
 #poke-client-enter,
@@ -2185,7 +2185,7 @@ body.android-app #android-server-settings-button {
     }
 
 #channel-properties-edit input[type="text"],
-#channel-password-enter input,
+#channel-password-enter input, .irc-dialog input,
 #musicbot-management-dialog input,
 #admin-password-enter input,
 #poke-client-enter input,

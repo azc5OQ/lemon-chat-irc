@@ -139,6 +139,204 @@ function linkPreview(address)
     return task;
 }
 
+// saved conversation files, each opened on first use
+const historyDatabases = new Map();
+
+/**
+ * @brief opens a saved conversation file and creates its table on first use
+ *
+ * @param string file -> SQLite file path
+ *
+ * @return object node:sqlite DatabaseSync connection
+ */
+function openHistory(file)
+{
+    if (!historyDatabases.has(file))
+    {
+        // load sqlite
+        const {DatabaseSync} = require('node:sqlite');
+        const historyDatabase = new DatabaseSync(file);
+        historyDatabases.set(file, historyDatabase);
+
+        // create the table
+        historyDatabase.exec('CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, network TEXT NOT NULL, conversation TEXT NOT NULL, name TEXT NOT NULL, author TEXT NOT NULL, text TEXT NOT NULL, time TEXT NOT NULL, kind TEXT NOT NULL, is_own INTEGER NOT NULL, is_action INTEGER NOT NULL); CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages (network, conversation, id);');
+    }
+    return historyDatabases.get(file);
+}
+
+/**
+ * @brief stores a batch of messages, or returns the last saved messages of one conversation
+ *
+ * @param object request -> http request: POST with a JSON array, or GET with network, conversation, limit and before (ISO time)
+ * @param object response -> http response
+ * @param URL url -> parsed request address
+ * @param string file -> SQLite file path
+ *
+ * @return void
+ */
+function answerHistory(request, response, url, file)
+{
+    const reply = (status, body) =>
+    {
+        response.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+        response.end(JSON.stringify(body));
+    };
+
+    // read saved messages
+    if (request.method === 'GET')
+    {
+        // no file is created by reading
+        if (!historyDatabases.has(file) && !fs.existsSync(file))
+        {
+            reply(200, []);
+            return;
+        }
+        try
+        {
+            const limit = Math.min(500, Math.max(0, Math.floor(Number(url.searchParams.get('limit')) || 0)));
+            const rows = openHistory(file).prepare('SELECT author, text, time, kind, is_own, is_action FROM messages WHERE network = ? AND conversation = ? AND time < ? ORDER BY id DESC LIMIT ?').all(url.searchParams.get('network') || '', url.searchParams.get('conversation') || '', url.searchParams.get('before') || '9999', limit);
+            reply(200, rows.reverse());
+        }
+        catch (error)
+        {
+            reply(500, {error: error.message});
+        }
+        return;
+    }
+
+    // read the batch
+    let body = '';
+    let is_too_large = false;
+    request.setEncoding('utf8');
+    request.on('data', part =>
+    {
+        body += part;
+        if (body.length > 1048576)
+        {
+            is_too_large = true;
+            request.destroy();
+        }
+    });
+    request.on('end', () =>
+    {
+        if (is_too_large)
+        {
+            return;
+        }
+        try
+        {
+            const entries = JSON.parse(body);
+            if (!Array.isArray(entries) || entries.length > 2000)
+            {
+                throw new Error('Invalid history batch');
+            }
+            const database = openHistory(file);
+            const insert = database.prepare('INSERT INTO messages (network, conversation, name, author, text, time, kind, is_own, is_action) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+
+            // store in one transaction
+            database.exec('BEGIN');
+            try
+            {
+                for (const entry of entries)
+                {
+                    const field = name => typeof entry?.[name] === 'string' ? entry[name].slice(0, 8192) : '';
+                    insert.run(field('network'), field('conversation'), field('name'), field('author'), field('text'), field('time'), field('kind'), entry?.is_own ? 1 : 0, entry?.is_action ? 1 : 0);
+                }
+                database.exec('COMMIT');
+            }
+            catch (error)
+            {
+                database.exec('ROLLBACK');
+                throw error;
+            }
+            reply(200, {saved: entries.length});
+        }
+        catch (error)
+        {
+            reply(400, {error: error.message});
+        }
+    });
+}
+
+/**
+ * @brief returns or replaces the encrypted identities file; the page encrypts it, the bridge only stores it
+ *
+ * @param object request -> http request: GET, or POST with {version, iterations, salt, iv, data}
+ * @param object response -> http response
+ * @param string file -> identities file path
+ *
+ * @return void
+ */
+function answerIdentities(request, response, file)
+{
+    const reply = (status, body) =>
+    {
+        response.writeHead(status, {'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store'});
+        response.end(JSON.stringify(body));
+    };
+
+    // read the file
+    if (request.method === 'GET')
+    {
+        fs.readFile(file, 'utf8', (error, text) =>
+        {
+            if (error)
+            {
+                reply(error.code === 'ENOENT' ? 200 : 500, error.code === 'ENOENT' ? {is_existing: false} : {error: error.message});
+                return;
+            }
+            try
+            {
+                reply(200, {is_existing: true, file: JSON.parse(text)});
+            }
+            catch (parseError)
+            {
+                reply(500, {error: 'The identities file is not valid JSON'});
+            }
+        });
+        return;
+    }
+
+    // read the new content
+    let body = '';
+    let is_too_large = false;
+    request.setEncoding('utf8');
+    request.on('data', part =>
+    {
+        body += part;
+        if (body.length > 1048576)
+        {
+            is_too_large = true;
+            request.destroy();
+        }
+    });
+    request.on('end', () =>
+    {
+        if (is_too_large)
+        {
+            return;
+        }
+        try
+        {
+            const content = JSON.parse(body);
+            if (!content || content.version !== 1 || !Number.isInteger(content.iterations) || !['salt', 'iv', 'data'].every(name => typeof content[name] === 'string' && /^[A-Za-z0-9+/=]*$/.test(content[name])))
+            {
+                throw new Error('Invalid identities file');
+            }
+
+            // replace the file in one step
+            const temporary = file + '.new';
+            fs.writeFileSync(temporary, JSON.stringify(content));
+            fs.renameSync(temporary, file);
+            reply(200, {is_saved: true});
+        }
+        catch (error)
+        {
+            reply(400, {error: error.message});
+        }
+    });
+}
+
 // configured server list
 function createBridge(options = {})
 {
@@ -184,6 +382,9 @@ function createBridge(options = {})
         }
     };
     const token = /^[a-f0-9]{64}$/.test(options.token || '') ? options.token : crypto.randomBytes(32).toString('hex');
+    // saved conversations are written to the folder the program was started from
+    const historyFile = options.historyFile || path.join(process.cwd(), 'conversations.sqlite');
+    const identitiesFile = options.identitiesFile || path.join(process.cwd(), 'identities.lemon');
     const secure = options.cert && options.key;
     const scheme = secure ? 'https' : 'http';
     const sockets = new Set();
@@ -246,6 +447,31 @@ function createBridge(options = {})
             });
             return;
         }
+        // saved conversations, only from the page itself
+        if (['GET', 'POST'].includes(request.method) && request.url.startsWith('/history?'))
+        {
+            const url = new URL(request.url, origin);
+            if (url.pathname !== '/history' || url.searchParams.get('token') !== token || (request.method === 'POST' && request.headers.origin !== origin))
+            {
+                response.writeHead(403).end();
+                return;
+            }
+            answerHistory(request, response, url, historyFile);
+            return;
+        }
+
+        // encrypted identities, only from the page itself
+        if (['GET', 'POST'].includes(request.method) && request.url.startsWith('/identities?'))
+        {
+            const url = new URL(request.url, origin);
+            if (url.pathname !== '/identities' || url.searchParams.get('token') !== token || (request.method === 'POST' && request.headers.origin !== origin))
+            {
+                response.writeHead(403).end();
+                return;
+            }
+            answerIdentities(request, response, identitiesFile);
+            return;
+        }
         if (request.method !== 'GET' || !['/', '/client.html'].includes(request.url))
         {
             response.writeHead(404).end();
@@ -278,7 +504,16 @@ function createBridge(options = {})
             socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n');
             return;
         }
-        const network = networks.get(url.searchParams.get('network') || defaultNetwork.id);
+        let network = networks.get(url.searchParams.get('network') || defaultNetwork.id);
+
+        // a server typed in the connect window instead of a listed one
+        if (url.searchParams.has('host'))
+        {
+            const host = (url.searchParams.get('host') || '').replace(/^\[|\]$/g, '');
+            const port = Number(url.searchParams.get('port'));
+            const is_valid_host = /^[A-Za-z0-9.\-]{1,253}$/.test(host) || net.isIP(host) !== 0;
+            network = is_valid_host && Number.isInteger(port) && port >= 1 && port <= 65535 ? {id: 'custom', name: host, host, port, tls: url.searchParams.get('tls') === 'true'} : null;
+        }
         if (request.headers.host !== new URL(origin).host || request.headers.origin !== origin || url.pathname !== '/irc' || url.searchParams.get('token') !== token || !network || wss.clients.size >= 8)
         {
             socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
@@ -390,6 +625,10 @@ function createBridge(options = {})
                 wss.close();
                 server.close();
                 server.closeAllConnections();
+
+                // close the saved conversations
+                historyDatabases.get(historyFile)?.close();
+                historyDatabases.delete(historyFile);
             }});
         });
     });

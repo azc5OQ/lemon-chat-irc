@@ -31,6 +31,8 @@ const {createBridge} = require('../bridge/server.cjs');
             await page.getByRole('button', {name: 'Browse IRC servers', exact: true}).tap();
             await page.getByRole('button', {name: 'Choose Libera.Chat', exact: true}).tap();
             await page.locator('#irc-nickname').fill(names[index]);
+            await page.locator('#irc-username').fill('tester');
+            await page.locator('#irc-realname').fill('Lemon Tester');
             await page.locator('#connect-button').tap();
             await page.waitForFunction(() => window.ircClient.connected, null, {timeout: 60000});
             await page.waitForFunction(() => !window.ircClient.listing, null, {timeout: 90000});

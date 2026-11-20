@@ -132,7 +132,11 @@ const {createBridge} = require('../bridge/server.cjs');
             await page.locator('#local-settings-tab-' + tab).click();
         }
     };
-    const save = () => page.locator('#local-settings-close-button').click();
+    const save = async () =>
+    {
+        await page.locator('#local-settings-close-button').click();
+        await page.locator('#local-settings-x-button').click();
+    };
     const sort = async (owner, submenu, option) =>
     {
         await owner.click({button: 'right'});
@@ -162,10 +166,14 @@ const {createBridge} = require('../bridge/server.cjs');
         });
         await page.goto(bridge.url);
         await page.locator('#irc-nickname').fill('Invalid Nick');
+        await page.locator('#irc-username').fill('tester');
+        await page.locator('#irc-realname').fill('Lemon Tester');
         await page.locator('#connect-button').click();
         await page.waitForFunction(() => window.soundEvents.some(event => event.source === g_sound_effects.error.src && event.played));
         assert.equal(await page.evaluate(() => window.ircClient.connected), false);
         await page.locator('#irc-nickname').fill('Tester');
+        await page.locator('#irc-username').fill('tester');
+        await page.locator('#irc-realname').fill('Lemon Tester');
         await page.locator('#connect-button').click();
         await page.waitForFunction(() => window.ircClient.connected && window.ircClient.directory.size === 3);
         await music.dblclick();
